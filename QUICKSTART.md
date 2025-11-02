@@ -1,5 +1,7 @@
 # Quick Start Guide
 
+> **📌 Cursor IDE Users**: This directory includes `.cursorrules` for AI assistant integration.
+
 ## Recommended Setup
 
 **Place `tau_helper` as a sibling directory to `warrior-tau-bench`:**
@@ -270,6 +272,7 @@ pip install -r tau_helper/requirements.txt
 - **Full Documentation**: See `README.md`
 - **All Commands**: Run `python ../tau_helper/run.py --help`
 - **Domain-Specific**: Run commands with `--help` (e.g., `scaffold --help`)
+- **Cursor IDE Users**: See `.cursorrules` for AI assistant integration
 
 ## Pro Tips
 

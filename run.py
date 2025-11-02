@@ -22,6 +22,10 @@ REPO_ROOT = SCRIPT_DIR.parent
 # Add repo root to Python path so we can import tau_helper
 sys.path.insert(0, str(REPO_ROOT))
 
+# Add current working directory to Python path so we can import domains
+# This is crucial when tau_helper is a sibling directory
+sys.path.insert(0, str(Path.cwd()))
+
 # Note: We do NOT change directory. The tool needs CWD to be the repo root
 # to find domains/. The .env file is loaded relative to the script location
 # in llm.py using Path(__file__).parent, so it doesn't need CWD to be tau_helper/

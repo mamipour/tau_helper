@@ -1,0 +1,69 @@
+# Tau-Helper: Warrior Tau-Bench Helper Library
+
+## Project Structure
+
+```
+your-workspace/
+├── warrior-tau-bench/    ← Main project repository
+│   ├── domains/          ← Domain implementations (sec, airline, etc.)
+│   └── ...
+└── tau_helper/           ← This helper library (SIBLING directory)
+    ├── run.py            ← Entry point
+    ├── cli.py            ← CLI commands
+    ├── .env              ← Configuration (API keys, models)
+    └── ...
+```
+
+## Critical Setup
+
+**Always run from `warrior-tau-bench/` root:**
+
+```bash
+cd warrior-tau-bench
+python ../tau_helper/run.py <command>
+```
+
+**Why?** The tool uses `Path.cwd()` to find `domains/` directory.
+
+## Configuration
+
+`.env` file location: `tau_helper/.env` (relative to this directory)
+
+Required variables:
+- `DEFAULT_MODEL` - For instruction evaluation
+- `DEFAULT_MODEL_R` - For SOP mapping and scaffolding
+- `DEFAULT_MODEL_R2` (optional) - For multi-agent scaffolding
+- `DEFAULT_MODEL_R_JUDGE` (optional) - For multi-agent judge
+
+## Quick Commands
+
+```bash
+# From warrior-tau-bench/ directory:
+python ../tau_helper/run.py info
+python ../tau_helper/run.py list-domains
+python ../tau_helper/run.py scaffold sec --variation variation_2 --task task_001
+python ../tau_helper/run.py map-sop sec --variation variation_2 --task task_001
+python ../tau_helper/run.py execute sec --variation variation_2 --task task_001
+```
+
+## Key Features
+
+1. **Instruction Evaluation** - Score 0-100 for user-facing quality
+2. **SOP Chain Mapper** - Map instructions to SOPs, detect ambiguity
+3. **Task Scaffolder** - Generate complete tasks from instructions
+4. **Action Executor** - Execute and debug domain task actions
+5. **Agent Log Reader** - Analyze agent evaluation results
+
+## Documentation
+
+- **Full docs**: `README.md`
+- **Quick start**: `QUICKSTART.md`
+- **Help**: `python ../tau_helper/run.py --help`
+
+## Important Notes
+
+- This library is **domain-agnostic** - works with all warrior-tau-bench domains
+- Always ensure you're in `warrior-tau-bench/` root when running commands
+- The tool loads domains from CWD, but loads `.env` from its own directory
+- Multi-agent mode (R2 + Judge) significantly improves scaffold quality
+

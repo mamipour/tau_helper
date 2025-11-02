@@ -2,6 +2,8 @@
 
 A comprehensive toolkit for creating, validating, and managing tasks, tools, and SOPs across all Warrior Tau-Bench domains.
 
+> **📌 Cursor IDE Users**: This directory includes `.cursorrules` for AI assistant integration. The file is automatically loaded by Cursor to help you work with this library.
+
 ## Installation
 
 **Setup:** Place `tau_helper` as a sibling directory to `warrior-tau-bench`:
@@ -389,6 +391,7 @@ tau_helper/
 
 - **README.md** - This file (command reference)
 - **QUICKSTART.md** - 5-minute quick start guide
+- **.cursorrules** - Cursor IDE integration (auto-loaded for AI assistance)
 
 ## Support
 
