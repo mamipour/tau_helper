@@ -17,10 +17,6 @@ your-workspace/
 **Install:**
 
 ```bash
-# Move tau_helper out of the repository if needed
-cd /path/to/your-workspace
-mv warrior-tau-bench/tau_helper .
-
 # Install dependencies
 pip install -r tau_helper/requirements.txt
 ```
