@@ -18,7 +18,7 @@ your-workspace/
 
 ## Installation (One-Time)
 
-### Option A: Move to Sibling Directory (Recommended)
+### Move to Sibling Directory
 
 If `tau_helper` is currently inside `warrior-tau-bench`, move it out:
 
@@ -33,18 +33,10 @@ mv warrior-tau-bench/tau_helper .
 #   └── tau_helper/
 ```
 
-### Option B: Keep Inside Repository (Also Works)
-
-You can keep `tau_helper` inside `warrior-tau-bench`. Both setups are fully supported.
-
 ### Install Dependencies
 
 ```bash
-# If you moved it (Option A):
 pip install -r tau_helper/requirements.txt
-
-# If it's still inside the repo (Option B):
-pip install -r warrior-tau-bench/tau_helper/requirements.txt
 ```
 
 ## Configuration
@@ -80,16 +72,9 @@ EOF
 **Always run from `warrior-tau-bench/` root:**
 
 ```bash
-# If tau_helper is a sibling directory (recommended):
 cd warrior-tau-bench
 python ../tau_helper/run.py <command>
-
-# If tau_helper is inside the repository (also works):
-cd warrior-tau-bench
-python tau_helper/run.py <command>
 ```
-
-**Note:** All examples below use `../tau_helper/run.py` (sibling setup). If you haven't moved `tau_helper` yet, just replace `../tau_helper/run.py` with `tau_helper/run.py`.
 
 ## Quick Examples
 

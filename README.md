@@ -4,17 +4,26 @@ A comprehensive toolkit for creating, validating, and managing tasks, tools, and
 
 ## Installation
 
-```bash
-# Option 1: tau_helper inside the repository (default)
-cd /path/to/warrior-tau-bench
-pip install -r tau_helper/requirements.txt
+**Setup:** Place `tau_helper` as a sibling directory to `warrior-tau-bench`:
 
-# Option 2: tau_helper as a sibling directory (location-independent)
-# tau_helper can be placed anywhere, as long as you run it from warrior-tau-bench root
-pip install -r /path/to/tau_helper/requirements.txt
+```
+your-workspace/
+├── warrior-tau-bench/    ← Main project
+└── tau_helper/           ← Helper tools
 ```
 
-**Important**: Always run `tau_helper` commands from the `warrior-tau-bench/` root directory, regardless of where `tau_helper` is located. The tool uses the current working directory to find domains.
+**Install:**
+
+```bash
+# Move tau_helper out of the repository if needed
+cd /path/to/your-workspace
+mv warrior-tau-bench/tau_helper .
+
+# Install dependencies
+pip install -r tau_helper/requirements.txt
+```
+
+**Important**: Always run `tau_helper` commands from the `warrior-tau-bench/` root directory. The tool uses the current working directory to find domains.
 
 ## Configuration
 
@@ -59,20 +68,9 @@ DEFAULT_BASE_URL_R_JUDGE=https://api.friendli.ai/serverless/v1
 **Always run from `warrior-tau-bench/` root:**
 
 ```bash
-# If tau_helper is inside the repository:
-cd /path/to/warrior-tau-bench
-python tau_helper/run.py <command>
-
-# If tau_helper is a sibling directory:
 cd /path/to/warrior-tau-bench
 python ../tau_helper/run.py <command>
-
-# Or with an absolute path:
-cd /path/to/warrior-tau-bench
-python /path/to/tau_helper/run.py <command>
 ```
-
-The tool is **location-independent**: it finds domains using the current working directory, and loads `.env` relative to its own location.
 
 ## Quick Command Reference
 
@@ -80,36 +78,36 @@ The tool is **location-independent**: it finds domains using the current working
 
 ```bash
 # Show info and list domains
-python tau_helper/run.py info
-python tau_helper/run.py list-domains
-python tau_helper/run.py list-domains --domain sec
+python ../tau_helper/run.py info
+python ../tau_helper/run.py list-domains
+python ../tau_helper/run.py list-domains --domain sec
 ```
 
 ### Instruction Evaluation
 
 ```bash
 # Evaluate single instruction
-python tau_helper/run.py evaluate "You are analyzing financial data"
+python ../tau_helper/run.py evaluate "You are analyzing financial data"
 
 # Batch evaluation from file
-python tau_helper/run.py evaluate -f instructions.txt --batch
+python ../tau_helper/run.py evaluate -f instructions.txt --batch
 ```
 
 ### SOP Chain Mapping
 
 ```bash
 # Map instruction from task
-python tau_helper/run.py map-sop <domain> --variation <variation> --task <task_id>
-python tau_helper/run.py map-sop sec --variation variation_2 --task task_001
+python ../tau_helper/run.py map-sop <domain> --variation <variation> --task <task_id>
+python ../tau_helper/run.py map-sop sec --variation variation_2 --task task_001
 
 # Compare predicted vs actual actions
-python tau_helper/run.py map-sop sec --variation variation_2 --task task_001 --compare
+python ../tau_helper/run.py map-sop sec --variation variation_2 --task task_001 --compare
 
 # Map custom instruction
-python tau_helper/run.py map-sop sec --variation variation_2 --instruction "Calculate WACC for Tesla"
+python ../tau_helper/run.py map-sop sec --variation variation_2 --instruction "Calculate WACC for Tesla"
 
 # Use specific model (override DEFAULT_MODEL_R)
-python tau_helper/run.py map-sop sec --variation variation_2 --task task_001 --model gpt-4o
+python ../tau_helper/run.py map-sop sec --variation variation_2 --task task_001 --model gpt-4o
 ```
 
 **SOP Mapper Output:**
@@ -123,27 +121,27 @@ python tau_helper/run.py map-sop sec --variation variation_2 --task task_001 --m
 
 ```bash
 # Generate complete task from instruction
-python tau_helper/run.py scaffold <domain> --variation <variation> --instruction "Your instruction"
+python ../tau_helper/run.py scaffold <domain> --variation <variation> --instruction "Your instruction"
 
 # Generate task from existing task (re-scaffold)
-python tau_helper/run.py scaffold <domain> --variation <variation> --task <task_id>
+python ../tau_helper/run.py scaffold <domain> --variation <variation> --task <task_id>
 
 # Generate without executing (placeholders remain)
-python tau_helper/run.py scaffold <domain> --variation <variation> --instruction "..." --no-execute
+python ../tau_helper/run.py scaffold <domain> --variation <variation> --instruction "..." --no-execute
 
 # Specify custom task ID
-python tau_helper/run.py scaffold <domain> --variation <variation> --instruction "..." --task-id task_new_001
+python ../tau_helper/run.py scaffold <domain> --variation <variation> --instruction "..." --task-id task_new_001
 
 # Configure max retries (default: 3)
-python tau_helper/run.py scaffold <domain> --variation <variation> --instruction "..." --max-retries 5
+python ../tau_helper/run.py scaffold <domain> --variation <variation> --instruction "..." --max-retries 5
 
 # Show detailed progress (or auto-show on error)
-python tau_helper/run.py scaffold <domain> --variation <variation> --instruction "..." --verbose
+python ../tau_helper/run.py scaffold <domain> --variation <variation> --instruction "..." --verbose
 
 # Examples
-python tau_helper/run.py scaffold sec --variation variation_2 --instruction "Extract Apple's financial data"
-python tau_helper/run.py scaffold sec --variation variation_2 --task task_001
-python tau_helper/run.py scaffold sec --variation variation_2 --task task_001 --verbose
+python ../tau_helper/run.py scaffold sec --variation variation_2 --instruction "Extract Apple's financial data"
+python ../tau_helper/run.py scaffold sec --variation variation_2 --task task_001
+python ../tau_helper/run.py scaffold sec --variation variation_2 --task task_001 --verbose
 ```
 
 **Task Scaffolder Features:**
@@ -234,50 +232,50 @@ Model: Judge → Model R2
 
 ```bash
 # List tasks
-python tau_helper/run.py execute <domain> --variation <variation> --list-tasks
+python ../tau_helper/run.py execute <domain> --variation <variation> --list-tasks
 
 # Show task details
-python tau_helper/run.py execute <domain> --variation <variation> --task <task_id> --show
+python ../tau_helper/run.py execute <domain> --variation <variation> --task <task_id> --show
 
 # Execute specific action
-python tau_helper/run.py execute <domain> --variation <variation> --task <task_id> --action <action_index>
+python ../tau_helper/run.py execute <domain> --variation <variation> --task <task_id> --action <action_index>
 
 # Execute all actions in sequence
-python tau_helper/run.py execute <domain> --variation <variation> --task <task_id>
+python ../tau_helper/run.py execute <domain> --variation <variation> --task <task_id>
 
 # Show database state
-python tau_helper/run.py execute <domain> --variation <variation> --task <task_id> --db-state
+python ../tau_helper/run.py execute <domain> --variation <variation> --task <task_id> --db-state
 
 # Reset database
-python tau_helper/run.py execute <domain> --variation <variation> --task <task_id> --reset-db
+python ../tau_helper/run.py execute <domain> --variation <variation> --task <task_id> --reset-db
 
 # Examples
-python tau_helper/run.py execute sec --variation variation_2 --list-tasks
-python tau_helper/run.py execute sec --variation variation_2 --task task_001 --action 0
-python tau_helper/run.py execute airline --variation variation_1 --task task_003
+python ../tau_helper/run.py execute sec --variation variation_2 --list-tasks
+python ../tau_helper/run.py execute sec --variation variation_2 --task task_001 --action 0
+python ../tau_helper/run.py execute airline --variation variation_1 --task task_003
 ```
 
 ### Agent Log Reader
 
 ```bash
 # Show statistics
-python tau_helper/run.py agent-logs <domain> --variation <variation> --stats
+python ../tau_helper/run.py agent-logs <domain> --variation <variation> --stats
 
 # Analyze specific task
-python tau_helper/run.py agent-logs <domain> --variation <variation> --task <task_id>
+python ../tau_helper/run.py agent-logs <domain> --variation <variation> --task <task_id>
 
 # Compare ground truth vs agent
-python tau_helper/run.py agent-logs <domain> --variation <variation> --task <task_id> --compare
+python ../tau_helper/run.py agent-logs <domain> --variation <variation> --task <task_id> --compare
 
 # Find problematic tasks
-python tau_helper/run.py agent-logs <domain> --variation <variation> --task <task_id> --errors-only
+python ../tau_helper/run.py agent-logs <domain> --variation <variation> --task <task_id> --errors-only
 
 # Custom agent.json location
-python tau_helper/run.py agent-logs <domain> --variation <variation> --agent-json path/to/agent.json --stats
+python ../tau_helper/run.py agent-logs <domain> --variation <variation> --agent-json path/to/agent.json --stats
 
 # Examples
-python tau_helper/run.py agent-logs sec --variation variation_2 --stats
-python tau_helper/run.py agent-logs sec --variation variation_2 --task task_072 --compare
+python ../tau_helper/run.py agent-logs sec --variation variation_2 --stats
+python ../tau_helper/run.py agent-logs sec --variation variation_2 --task task_072 --compare
 ```
 
 ## Understanding Instruction Quality
@@ -341,7 +339,7 @@ stats = reader.analyze_stats()
 ### 1. Validate Task Instructions
 ```bash
 # Check if task_001 instruction is clear
-python tau_helper/run.py map-sop sec --variation variation_2 --task task_001
+python ../tau_helper/run.py map-sop sec --variation variation_2 --task task_001
 
 # If ambiguous, you'll see:
 # - Ambiguity explanation
@@ -352,24 +350,24 @@ python tau_helper/run.py map-sop sec --variation variation_2 --task task_001
 ### 2. Debug Failed Task
 ```bash
 # See what agent did wrong
-python tau_helper/run.py agent-logs sec --variation variation_2 --task task_072 --compare
+python ../tau_helper/run.py agent-logs sec --variation variation_2 --task task_072 --compare
 
 # Execute actions manually to reproduce
-python tau_helper/run.py execute sec --variation variation_2 --task task_072 --show
-python tau_helper/run.py execute sec --variation variation_2 --task task_072 --action 0
-python tau_helper/run.py execute sec --variation variation_2 --task task_072 --db-state
+python ../tau_helper/run.py execute sec --variation variation_2 --task task_072 --show
+python ../tau_helper/run.py execute sec --variation variation_2 --task task_072 --action 0
+python ../tau_helper/run.py execute sec --variation variation_2 --task task_072 --db-state
 ```
 
 ### 3. Test New Task
 ```bash
 # Execute all actions
-python tau_helper/run.py execute sec --variation variation_2 --task task_001
+python ../tau_helper/run.py execute sec --variation variation_2 --task task_001
 
 # Check final database state
-python tau_helper/run.py execute sec --variation variation_2 --task task_001 --db-state
+python ../tau_helper/run.py execute sec --variation variation_2 --task task_001 --db-state
 
 # Reset and retry
-python tau_helper/run.py execute sec --variation variation_2 --task task_001 --reset-db
+python ../tau_helper/run.py execute sec --variation variation_2 --task task_001 --reset-db
 ```
 
 ## Architecture
@@ -396,8 +394,8 @@ tau_helper/
 
 ```bash
 # Get help
-python tau_helper/run.py --help
-python tau_helper/run.py <command> --help
+python ../tau_helper/run.py --help
+python ../tau_helper/run.py <command> --help
 ```
 
 ## Version
