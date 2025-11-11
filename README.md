@@ -118,66 +118,39 @@ python ../tau_helper/run.py map-sop sec --variation variation_2 --task task_001 
 ### Task Scaffolder
 
 ```bash
-# Generate complete task from instruction
-python ../tau_helper/run.py scaffold <domain> --variation <variation> --instruction "Your instruction"
+# IMPORTANT: Execution mode is in development - MUST use --no-execute
+# Generate task with placeholders (no-execute mode)
+python ../tau_helper/run.py scaffold <domain> --variation <variation> --instruction "Your instruction" --no-execute
 
-# Generate task from existing task (re-scaffold)
-python ../tau_helper/run.py scaffold <domain> --variation <variation> --task <task_id>
-
-# Generate without executing (placeholders remain)
-python ../tau_helper/run.py scaffold <domain> --variation <variation> --instruction "..." --no-execute
+# Generate task from existing task (re-scaffold with placeholders)
+python ../tau_helper/run.py scaffold <domain> --variation <variation> --task <task_id> --no-execute
 
 # Specify custom task ID
-python ../tau_helper/run.py scaffold <domain> --variation <variation> --instruction "..." --task-id task_new_001
+python ../tau_helper/run.py scaffold <domain> --variation <variation> --instruction "..." --task-id task_new_001 --no-execute
 
 # Configure max retries (default: 3)
-python ../tau_helper/run.py scaffold <domain> --variation <variation> --instruction "..." --max-retries 5
+python ../tau_helper/run.py scaffold <domain> --variation <variation> --instruction "..." --max-retries 5 --no-execute
 
 # Show detailed progress (or auto-show on error)
-python ../tau_helper/run.py scaffold <domain> --variation <variation> --instruction "..." --verbose
+python ../tau_helper/run.py scaffold <domain> --variation <variation> --instruction "..." --verbose --no-execute
 
 # Examples
-python ../tau_helper/run.py scaffold sec --variation variation_2 --instruction "Extract Apple's financial data"
-python ../tau_helper/run.py scaffold sec --variation variation_2 --task task_001
-python ../tau_helper/run.py scaffold sec --variation variation_2 --task task_001 --verbose
+python ../tau_helper/run.py scaffold salesforce_management --variation variation_2 --instruction "Transfer accounts to Chris Sullivan" --no-execute
+python ../tau_helper/run.py scaffold salesforce_management --variation variation_2 --task task_001 --no-execute --verbose
 ```
 
 **Task Scaffolder Features:**
 - Maps instruction to SOP chain (reuses `map-sop` logic)
-- Generates action sequence with placeholders (`{{company_ticker}}`, `{{spreadsheet_id}}`)
-- Executes actions incrementally to fill placeholders from:
-  - LLM-provided defaults
-  - Previous tool outputs
-  - Deterministic calculations
+- Generates action sequence with placeholders (`{{query_single_user_record_output.Id}}`, `{{account_ids}}`)
+- **NO-EXECUTE mode only**: Outputs task with placeholders for manual resolution
 - **Automatic retry logic**: Retries up to 3 times (configurable) if generation fails
-- **Smart transformation detection**: LLM marks complex data transformations with `{{TRANSFORM: ...}}`
 - Shows progress and identifies missing values
-- Provides helpful guidance when manual intervention is needed
 - Outputs complete task in `tasks.py` format (ready to copy-paste)
 - **Model transparency**: Shows which model(s) generated the output:
   - `Model: Single Model` - Default single model mode
   - `Model: Consensus (R + R2)` - Both models agreed
   - `Model: Judge → Model R` or `Model: Judge → Model R2` - Judge resolved disagreement
   - `Model: Model R (R2 failed)` - Fallback to R after R2 failure
-
-**🚀 Advanced Feature: LLM-Powered Data Transformations**
-
-When a task requires complex data manipulation (e.g., merging multiple data sources, extracting specific fields, date parsing), the scaffolder can **automatically generate and execute transformation code**.
-
-**How it works:**
-1. The scaffolding LLM detects when a transformation is needed
-2. It marks the placeholder with transformation syntax: `{{TRANSFORM: merge income_statements, balance_sheets by period}}`
-3. A second LLM call generates Python code for the transformation
-4. The code is executed in a safe environment with available context
-5. The result is used to fill the placeholder
-
-**Example Transformation:**
-```
-Instruction: "Extract the last 3 fiscal years"
-→ LLM generates code to parse dates, sort by year, and take top 3
-→ Code executes using actual data from context
-→ Result: ["2023-FY", "2022-FY", "2021-FY"]
-```
 
 **🤖 Advanced Feature: Multi-Agent Architecture**
 
@@ -194,37 +167,11 @@ When `DEFAULT_MODEL_R2` and `DEFAULT_MODEL_R_JUDGE` are configured in `.env`, sc
 - **Reduced errors**: Model consensus validates correctness
 - **Automatic fallback**: System degrades gracefully if one model fails
 
-**Example Output (with `--verbose`):**
-```
-🤖 Multi-Agent Mode: Generating with both R and R2 models...
-  → Generating with Model R...
-    ✓ Model R: 12 actions
-  → Generating with Model R2...
-    ✓ Model R2: 13 actions
-  ⚠️  Models disagree - invoking judge...
-🔶 Judge selected: Model R2 scaffold
-
-Step 3: Executing actions to fill placeholders...
-  [... detailed execution logs ...]
-
-✅ Scaffold generation complete!
-Copy the above code to add this task to tasks.py
-
-Model: Judge → Model R2
-```
-
-**Output Control:**
-- **Default mode**: Shows only the generated task code and model summary
-- **With `--verbose`**: Shows full workflow including multi-agent process and execution logs
-- **On error**: Automatically shows verbose logs to help debug
-
 **Recommended Models:**
 - **R2**: `meta-llama-3.3-70b-instruct`, `deepseek-ai/DeepSeek-V3`, or other instruction-tuned models
 - **Judge**: `deepseek-ai/DeepSeek-R1-0528` (reasoning model works well for evaluation)
 
-**Note**: Models must support structured JSON output. If R2 consistently fails with parsing errors, consider using a different model or disabling multi-agent mode by removing the R2/JUDGE configuration.
-
-**This means the scaffolder can handle agent-level complexity!** It leverages LLMs to write and execute transformation logic just like agents do.
+**Note**: Models must support structured JSON output.
 
 ### Action Executor
 
@@ -334,7 +281,45 @@ stats = reader.analyze_stats()
 
 ## Common Workflows
 
-### 1. Validate Task Instructions
+### 1. Generate New Task (Complete Workflow)
+
+The correct workflow for generating tasks:
+
+```bash
+# Step 1: Evaluate instruction quality
+python ../tau_helper/run.py evaluate "You are Pat Manager. You want Chris Sullivan to succeed in Q1 2026..."
+
+# Step 2: Map instruction to SOPs (check for ambiguity)
+python ../tau_helper/run.py map-sop salesforce_management --variation variation_2 --instruction "You are Pat Manager..."
+
+# If ambiguous, use the suggested fix from Step 2, then:
+
+# Step 3: Evaluate the fixed instruction again
+python ../tau_helper/run.py evaluate "FIXED_INSTRUCTION_HERE"
+
+# Step 4: Scaffold with no-execute (generates task with {{placeholders}})
+python ../tau_helper/run.py scaffold salesforce_management --variation variation_2 --instruction "..." --task-id task_006 --no-execute
+
+# Step 5: Copy the scaffolded code to tasks.py
+
+# Step 6: Fill placeholders by executing actions one by one
+python ../tau_helper/run.py execute salesforce_management --variation variation_2 --task task_006 --all-actions
+
+# Step 7: Manually replace {{placeholders}} in tasks.py with actual values from execution
+# (Use the output from Step 6 to fill in the deterministic values)
+
+# Step 8: Validate the completed task
+uv run alignerr validate --domain salesforce_management --variation variation_2 --task-id task_006
+```
+
+**Why this workflow?**
+- **Step 1-3**: Ensures instruction is high quality, user-facing, and non-procedural
+- **Step 2**: Detects missing information before scaffolding
+- **Step 4**: Generates the action sequence structure
+- **Step 6-7**: Fills in deterministic values from actual tool execution
+- **Step 8**: Validates the final task works correctly
+
+### 2. Validate Task Instructions
 ```bash
 # Check if task_001 instruction is clear
 python ../tau_helper/run.py map-sop sec --variation variation_2 --task task_001

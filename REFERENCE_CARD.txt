@@ -1,0 +1,366 @@
+================================================================================
+TAU-HELPER REFERENCE CARD
+================================================================================
+
+Quick command reference for Warrior Tau-Bench task generation and validation.
+
+IMPORTANT: Always run from warrior-tau-bench/ root directory
+
+================================================================================
+TASK GENERATION WORKFLOW (8 Steps)
+================================================================================
+
+Step 1: Evaluate Instruction Quality
+──────────────────────────────────────
+python ../tau_helper/run.py evaluate "YOUR_INSTRUCTION"
+
+→ Score: 0-100 (aim for 80+)
+→ Checks if instruction is user-facing, non-procedural
+
+
+Step 2: Map to SOP Chain
+─────────────────────────
+python ../tau_helper/run.py map-sop DOMAIN --variation VARIATION \
+  --instruction "YOUR_INSTRUCTION"
+
+→ Maps instruction to SOPs
+→ Detects ambiguity
+→ Suggests fixes if ambiguous
+→ If ambiguous, use suggested fix and go back to Step 1
+
+
+Step 3: Evaluate Fixed Instruction (if needed)
+───────────────────────────────────────────────
+python ../tau_helper/run.py evaluate "FIXED_INSTRUCTION_FROM_STEP_2"
+
+→ Ensure fixed instruction still scores 80+, fix if needed and proceed.
+
+
+Step 4: Scaffold with NO-EXECUTE
+─────────────────────────────────
+python ../tau_helper/run.py scaffold DOMAIN --variation VARIATION \
+  --instruction "YOUR_INSTRUCTION" --task-id TASK_ID --no-execute
+
+→ Generates task with {{placeholders}}
+→ CRITICAL: Always use --no-execute (execution mode is in development)
+→ Copy output to tasks.py
+
+
+Step 5: Copy to tasks.py
+─────────────────────────
+(Manual) Copy the Task(...) block from Step 4 to tasks.py
+
+
+Step 6: Execute Actions to Get Values
+──────────────────────────────────────
+python ../tau_helper/run.py execute DOMAIN --variation VARIATION \
+  --task TASK_ID --all-actions
+
+→ Runs all actions sequentially
+→ Shows resolved values for each placeholder
+→ Save this output for Step 7
+
+
+Step 7: Fill Placeholders Manually
+───────────────────────────────────
+(Manual) Replace all {{placeholders}} in tasks.py with actual values from Step 6
+
+Example:
+  Before: kwargs={"source_owner_id": '{{query_single_user_record_output.Id}}'}
+  After:  kwargs={"source_owner_id": '0055e000001JKL'}
+
+
+Step 8: Validate
+────────────────
+uv run alignerr validate --domain DOMAIN --variation VARIATION --task-id TASK_ID
+
+→ Checks if task passes all criteria
+→ If fails, fix and re-run
+
+================================================================================
+QUICK COMMANDS
+================================================================================
+
+Evaluate Instruction
+────────────────────
+python ../tau_helper/run.py evaluate "You are analyzing financial data"
+python ../tau_helper/run.py evaluate -f instructions.txt --batch
+
+Map to SOPs
+───────────
+python ../tau_helper/run.py map-sop DOMAIN --variation VARIATION --task TASK_ID
+python ../tau_helper/run.py map-sop DOMAIN --variation VARIATION --instruction "..."
+python ../tau_helper/run.py map-sop DOMAIN --variation VARIATION --task TASK_ID --compare
+
+Scaffold Task
+─────────────
+python ../tau_helper/run.py scaffold DOMAIN --variation VARIATION \
+  --instruction "..." --task-id TASK_ID --no-execute
+
+python ../tau_helper/run.py scaffold DOMAIN --variation VARIATION \
+  --task TASK_ID --no-execute --verbose
+
+Execute Actions
+───────────────
+python ../tau_helper/run.py execute DOMAIN --variation VARIATION --list-tasks
+python ../tau_helper/run.py execute DOMAIN --variation VARIATION --task TASK_ID --show
+python ../tau_helper/run.py execute DOMAIN --variation VARIATION --task TASK_ID --all-actions
+python ../tau_helper/run.py execute DOMAIN --variation VARIATION --task TASK_ID --action INDEX
+python ../tau_helper/run.py execute DOMAIN --variation VARIATION --task TASK_ID --action-range 0-5
+
+Validate Task
+─────────────
+uv run alignerr validate --domain DOMAIN --variation VARIATION --task-id TASK_ID
+uv run alignerr validate --domain DOMAIN --variation VARIATION --max-task-workers 10
+
+Database Operations
+───────────────────
+python ../tau_helper/run.py execute DOMAIN --variation VARIATION --task TASK_ID --db-state
+python ../tau_helper/run.py execute DOMAIN --variation VARIATION --task TASK_ID --reset-db
+
+Agent Logs
+──────────
+python ../tau_helper/run.py agent-logs DOMAIN --variation VARIATION --stats
+python ../tau_helper/run.py agent-logs DOMAIN --variation VARIATION --task TASK_ID
+python ../tau_helper/run.py agent-logs DOMAIN --variation VARIATION --task TASK_ID --compare
+
+General
+───────
+python ../tau_helper/run.py info
+python ../tau_helper/run.py list-domains
+python ../tau_helper/run.py list-domains --domain PATTERN
+
+================================================================================
+PLACEHOLDER PATTERNS
+================================================================================
+
+Common Placeholders and How to Resolve Them
+────────────────────────────────────────────
+
+{{query_single_user_record_output.Id}}
+→ Source: query_single_user_record action → Result.user.Id
+→ Example: '0055e000001JKL'
+
+{{query_single_user_record_output_1.Id}}
+→ Source: Second query_single_user_record action → Result.user.Id
+→ Example: '0055e000001DEF'
+
+{{query_accounts_by_name_output.accounts[*].Id}}
+→ Source: query_accounts_by_name action → Result.accounts → extract Id from each
+→ Example: ['0015e00000BCDE', '0015e00000XYZ2']
+
+{{build_account_transfer_filter_output}}
+→ Source: build_account_transfer_filter action → entire Result dict
+→ Example: {"source_owner_id": "0055e000001JKL", "account_ids": [...], "requested_count": 2}
+
+{{query_accounts_for_transfer_output}}
+→ Source: query_accounts_for_transfer action → entire Result dict
+→ Example: {"accounts": [...full account objects...], "missing": []}
+
+{{validate_account_transfer_set_output}}
+→ Source: validate_account_transfer_set action → entire Result dict
+→ Example: {"accounts": [...], "count": 2, "source_owner_id": "...", "status": "validated"}
+
+{{compose_account_owner_updates_output}}
+→ Source: compose_account_owner_updates action → entire Result dict
+→ Example: {"updates": [{"Id": "...", "OwnerId": "...", "LastModifiedDate": "..."}], "target_owner_id": "..."}
+
+Array Extraction Syntax
+───────────────────────
+{{output.array[*].field}}
+→ Extracts 'field' from each element in 'array'
+→ Example: {{accounts[*].Id}} → ['id1', 'id2', 'id3']
+
+Dict Access Syntax
+──────────────────
+{{output.key1.key2}}
+→ Navigates nested dict: output['key1']['key2']
+→ Example: {{user_output.user.Id}} → '0055e000001JKL'
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+Error: "Execution mode is in development"
+─────────────────────────────────────────
+Problem: Forgot --no-execute flag
+Solution: Always add --no-execute to scaffold commands
+
+Error: "Cannot resolve placeholder"
+───────────────────────────────────
+Problem: Placeholder syntax incorrect or source action not found
+Solution: 
+  1. Check spelling of placeholder
+  2. Ensure source action exists before the placeholder usage
+  3. Use execution output to manually fill the value
+
+Error: "Accounts not owned by..."
+─────────────────────────────────
+Problem: Wrong source_owner_id or account IDs
+Solution:
+  1. Re-execute actions to get correct values
+  2. Check query_single_user_record result for correct owner ID
+  3. Ensure accounts are actually owned by that owner in database
+
+Error: "Tool 'X' not found"
+───────────────────────────
+Problem: Scaffolder hallucinated non-existent tool
+Solution:
+  1. Check tools.py for correct tool names
+  2. Check rules.py for correct SOP definitions
+  3. Re-scaffold with --verbose to debug
+
+Low Instruction Quality Score (<80)
+────────────────────────────────────
+Problem: Instruction is procedural or contains function names
+Solution:
+  1. Remove function names like get_user(), update_account()
+  2. Remove step-by-step instructions
+  3. Focus on WHAT user wants, not HOW to do it
+  4. Add user role and context
+
+SOP Mapping is Ambiguous
+────────────────────────
+Problem: Instruction missing critical information
+Solution:
+  1. Use the "Suggested Fix" from map-sop output
+  2. Add missing names, identifiers, or context
+  3. Re-evaluate and re-map until clear
+
+Validation Fails
+────────────────
+Problem: Task doesn't meet all criteria
+Solution:
+  1. Read validation error message carefully
+  2. Fix issues in tasks.py
+  3. Re-validate
+  4. If "logical_robustness" fails: check all parameters are traceable
+  5. If "instruction_quality" fails: rewrite instruction
+
+================================================================================
+CONFIGURATION
+================================================================================
+
+.env File Location: tau_helper/.env
+
+Required Variables
+──────────────────
+DEFAULT_MODEL=gpt-4o-mini                    # For instruction evaluation
+DEFAULT_API_KEY=your-api-key
+DEFAULT_BASE_URL=https://api.openai.com/v1
+
+DEFAULT_MODEL_R=gpt-5-mini                   # For SOP mapping and scaffolding
+DEFAULT_API_KEY_R=your-api-key-r
+DEFAULT_BASE_URL_R=https://api.openai.com/v1
+
+Optional (Multi-Agent Mode)
+───────────────────────────
+DEFAULT_MODEL_R2=meta-llama-3.3-70b-instruct
+DEFAULT_API_KEY_R2=your-api-key-r2
+DEFAULT_BASE_URL_R2=https://api.friendli.ai/serverless/v1
+
+DEFAULT_MODEL_R_JUDGE=deepseek-ai/DeepSeek-R1-0528
+DEFAULT_API_KEY_R_JUDGE=your-api-key-judge
+DEFAULT_BASE_URL_R_JUDGE=https://api.friendli.ai/serverless/v1
+
+================================================================================
+BEST PRACTICES
+================================================================================
+
+1. Always start with instruction evaluation (Step 1)
+   → Catches quality issues early
+
+2. Never skip SOP mapping (Step 2)
+   → Detects ambiguity before scaffolding
+
+3. Always use --no-execute
+   → Execution mode is in development
+
+4. Save execution output from Step 6
+   → You'll need it for filling placeholders
+
+5. Fill placeholders carefully
+   → One typo can break the entire task
+
+6. Validate immediately after filling
+   → Catch errors early
+
+7. Use --verbose for debugging
+   → Shows detailed scaffolding process
+
+8. Use multi-agent mode for higher quality
+   → Configure R2 and JUDGE models in .env
+
+================================================================================
+EXAMPLES
+================================================================================
+
+Example 1: Generate Task from Scratch
+──────────────────────────────────────
+# Step 1: Evaluate
+python ../tau_helper/run.py evaluate "You are Pat Manager. You want Chris Sullivan to succeed in Q1 2026."
+
+# Step 2: Map SOPs
+python ../tau_helper/run.py map-sop salesforce_management --variation variation_2 \
+  --instruction "You are Pat Manager. You want Chris Sullivan to succeed in Q1 2026."
+
+# Step 3: Evaluate fixed (if needed)
+python ../tau_helper/run.py evaluate "FIXED_INSTRUCTION"
+
+# Step 4: Scaffold
+python ../tau_helper/run.py scaffold salesforce_management --variation variation_2 \
+  --instruction "You are Pat Manager..." --task-id task_006 --no-execute
+
+# Step 5: Copy to tasks.py (manual)
+
+# Step 6: Execute
+python ../tau_helper/run.py execute salesforce_management --variation variation_2 \
+  --task task_006 --all-actions
+
+# Step 7: Fill placeholders (manual)
+
+# Step 8: Validate
+uv run alignerr validate --domain salesforce_management --variation variation_2 --task-id task_006
+
+Example 2: Re-scaffold Existing Task
+─────────────────────────────────────
+# Check instruction quality
+python ../tau_helper/run.py map-sop salesforce_management --variation variation_2 --task task_001
+
+# Re-scaffold
+python ../tau_helper/run.py scaffold salesforce_management --variation variation_2 \
+  --task task_001 --no-execute --verbose
+
+# Execute and fill
+python ../tau_helper/run.py execute salesforce_management --variation variation_2 \
+  --task task_001 --all-actions
+
+# (Fill placeholders manually in tasks.py)
+
+# Validate
+uv run alignerr validate --domain salesforce_management --variation variation_2 --task-id task_001
+
+Example 3: Debug Failed Task
+─────────────────────────────
+# Check agent logs
+python ../tau_helper/run.py agent-logs salesforce_management --variation variation_2 \
+  --task task_003 --compare
+
+# Execute manually to debug
+python ../tau_helper/run.py execute salesforce_management --variation variation_2 \
+  --task task_003 --show
+
+python ../tau_helper/run.py execute salesforce_management --variation variation_2 \
+  --task task_003 --action 0
+
+# Check database state
+python ../tau_helper/run.py execute salesforce_management --variation variation_2 \
+  --task task_003 --db-state
+
+# Reset and retry
+python ../tau_helper/run.py execute salesforce_management --variation variation_2 \
+  --task task_003 --reset-db
+
+================================================================================
+END OF REFERENCE CARD
+================================================================================

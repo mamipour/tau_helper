@@ -63,15 +63,14 @@ class SOPMapper:
     detect ambiguities, and explain different interpretations.
     """
     
-    MAPPING_PROMPT = """You are an expert at analyzing task instructions in the Warrior Tau-Bench system.
+    MAPPING_PROMPT = """You are an expert at analyzing task instructions and mapping them to Standard Operating Procedures (SOPs).
 
 ## Your Task
 
-Given a task instruction and available SOPs (Standard Operating Procedures), determine:
-1. Which SOP chain will be executed (INCLUDING prerequisites)
+Given a task instruction and available SOPs, determine:
+1. Which SOP chain(s) will be executed
 2. Whether the instruction is ambiguous (multiple valid interpretations)
-3. Why it's ambiguous (if applicable)
-4. Alternative interpretations
+3. Alternative interpretations (if ambiguous)
 
 ## SOPs Available
 
@@ -81,128 +80,130 @@ Given a task instruction and available SOPs (Standard Operating Procedures), det
 
 {instruction}
 
-## Instructions for Analysis
+## Analysis Instructions
 
-1. **Identify the COMPLETE SOP Chain**: 
-   - List ALL steps that would be executed in order
-   - INCLUDE prerequisites (setup_python_environment, get_configuration, configure_sec_api_identity, validate_company_data_access)
-   - INCLUDE the actual SOPs (e.g., "SOP Pull Core Statements", "SOP Persist Normalized Financials")
-   - Show parameters for SOPs where applicable (e.g., company_ticker=AAPL, num_periods=3)
-   - Prerequisites always run BEFORE SOPs when SEC data extraction is needed
+### 1. Identify ALL Complete SOP Chains
 
-2. **Check for Ambiguity**: Could the instruction be interpreted in multiple ways?
-   - Does it leave execution details unclear that would lead to DIFFERENT SOP chains?
-   - Could it map to genuinely different SOP sequences?
-   - CRITICAL: If primary chain confidence is >85%, mark as NOT ambiguous (is_ambiguous=false)
-   - Only mark ambiguous if there are truly MULTIPLE REASONABLE interpretations
-   
-3. **Explain Reasoning**: Why does this instruction map to this SOP chain?
-   - What keywords/phrases indicate which SOPs to use?
-   - What policies/rules guide the chain?
+**CRITICAL: Multi-Workflow Detection**
+- Instructions may contain MULTIPLE independent workflows
+- Look for conjunction words: "also", "additionally", "and", "furthermore", "plus", "as well as"
+- Look for sequential patterns: "before X, do Y", "want to understand X before Y", "need to check X then Y"
+- Look for "then" clauses: "do X... Then Y" → Both X and Y need SOPs
+- If instruction mentions MULTIPLE distinct operations, include SOPs for ALL of them
+- List ALL SOPs for ALL workflows in logical execution order
 
-4. **Alternative Interpretations**: ONLY if truly ambiguous
-   - Only provide alternatives if is_ambiguous=true
-   - Alternatives should have meaningful confidence (>30%)
-   - Confidence scores should make logical sense: if primary is 60%, alternatives could be 40-50%
-   - If primary is >85%, there should be NO alternatives (not ambiguous)
-   - Each alternative must represent a genuinely different interpretation, not just "nice to have" features
+**Don't Skip Analysis/Understanding Operations**
+- Keywords: "want to understand", "need to check", "review", "analyze", "see", "assess", "view"
+- + data/performance/results → This requires EXECUTION of analysis/aggregation SOPs
+- "To baseline", "to establish baseline", "to assess capacity" → Also require analysis SOPs
+- Pattern: "understand/check X... then Y" → Both X (analysis) and Y (action) need SOPs
 
-5. **Missing Information**: What details would help disambiguate? (ONLY if ambiguous)
-   - If is_ambiguous=false, set missing_information to empty list []
-   - If is_ambiguous=true, list ONLY information that would help choose between primary and alternatives
-   - DON'T list "nice to have" features that aren't mentioned in the instruction
-   - DON'T list standard concepts that have deterministic meanings
-   - DON'T list information available from domain rules/policies
-   - Examples of truly missing: explicit output destination (DB vs spreadsheet), validation requirements beyond standard
+**Entity Lookup Requirements (CRITICAL)**
+- EVERY entity mentioned by NAME must be looked up BEFORE being used in ANY operation
+- Named entities (people, accounts, records) require lookup SOPs to get their IDs
+- NEVER assume IDs are available without lookup SOPs
+- If multiple entities are mentioned (e.g., "from Person A to Person B"), include lookup SOPs for EACH
 
-6. **Suggest a Fix** (ONLY if ambiguous):
-   - If is_ambiguous=false, set suggested_fix to null (instruction is already clear)
-   - If is_ambiguous=true AND fixable by minimal edits, provide a COMPLETE suggested_fix
-   - The suggested_fix must be a FULL REWRITE based ONLY on the PRIMARY chain
-   - CRITICAL: The suggested fix must meet USER-FACING and NON-PROCEDURAL criteria (score 80-100):
-     - **Written in second person**: Use "You are...", "You want to...", "You need to..."
-     - **Describes WHAT, not HOW**: Focus on goals and outcomes, never implementation steps
-     - **Natural, conversational language**: Like a colleague describing a task
-     - **NO function names**: Never mention API calls, function names, or technical operations
-     - **NO step-by-step instructions**: Never use "First...", "Then...", "Call...", "Execute..."
-     - **NO procedural hints**: No "retrieve X then calculate Y" style instructions
-   - CRITICAL RULES for suggested fix:
-     - **Based on primary chain ONLY**: Include ONLY SOPs from the primary chain, nothing from alternatives
-     - **Don't mention unasked features**: If the original doesn't ask for spreadsheets/time-series/etc, don't add them
-     - **Concrete, not questions**: Provide a complete instruction, NEVER ask "Please specify..." or "Do you want..."
-     - **Minimal changes**: Keep same story, role, context, tone - only add clarity for ambiguous parts
-   
-   - What to clarify in the fix:
-     - If original says "for DCF model" (ambiguous), make it explicit: "stored in the financials database"
-     - If original says "ensure consistency" (vague), be specific: "normalized and validated"
-     - If original says "prepare data" (ambiguous), clarify: "extract, store, and normalize"
-   
-   - What NOT to add:
-     - DON'T add features not in primary chain (e.g., if primary chain doesn't create spreadsheet, don't mention it)
-     - DON'T ask questions ("specify whether...", "indicate if...")
-     - DON'T add procedural steps ("first", "then", "call X then Y")
-     - DON'T change the persona, role, or business context
-   
-   - Examples (USER-FACING and NON-PROCEDURAL):
-     ✅ GOOD: "You are Sarah Chen. You want to extract Apple's income statements, balance sheets, and cash flow statements for the last 3 fiscal years, store them in the financials database, and normalize the data for future DCF analysis."
-     ✅ GOOD: "You need to analyze Tesla's Q4 2023 financial performance and calculate their debt-to-equity ratio."
-     ❌ BAD (procedural): "First, call get_balance_sheet() for Apple, then execute normalize_financials() with the results."
-     ❌ BAD (asking questions): "Please specify whether you want the data in a spreadsheet or database."
-     ❌ BAD (step-by-step): "First retrieve the balance sheet, then calculate ratios, then store the results."
-   
-   - Complete Example:
-     Original (ambiguous): "You are Sarah Chen. You want to analyze Apple's financials by extracting their statements for DCF modeling."
-     Primary chain: Extract + Store + Normalize (no spreadsheet, no time-series)
-     Fixed (clear, user-facing, non-procedural): "You are Sarah Chen. You want to extract Apple's income statements, balance sheets, and cash flow statements for the last 3 fiscal years, store them in the financials database, and normalize the data for future DCF analysis."
-     
-   - When to set suggested_fix to null:
-     - If is_ambiguous=false (already clear)
-     - If ambiguity requires a true business decision between fundamentally different workflows
+**Transfer/Reassignment Operations Require BOTH Lookups:**
+- When instruction says "transfer/reassign X from Person A to Person B":
+  * Person A (source) → needs "Locate Source Owner" or "Locate Sales Representative" SOP
+  * Person B (target) → needs "Locate Sales Representative" SOP  
+  * Entity X (account/record) → needs "Lookup Accounts by Name" or similar SOP
+  * ALL THREE must be looked up BEFORE the transfer operation
+- Example: "reassign BlueCurve from Ava to Chris"
+  * SOP 1: Locate Source Owner (Ava)
+  * SOP 2: Locate Sales Representative (Chris)
+  * SOP 3: Lookup Accounts by Name (BlueCurve)
+  * SOP 4-5: Transfer/Reassignment SOPs
+- NEVER skip the target lookup - the target entity ALWAYS needs to be looked up
+
+**Multi-Word Entity Detection**
+- Multi-word proper nouns (e.g., "Delta Freight", "John Smith") are entity names
+- Pattern: [Capitalized Words] + action verb → Entity name that needs lookup
+- Entity lookups must happen BEFORE operations that use them
+
+**Transfer/Reassignment SOP Prerequisites:**
+- For ANY transfer/reassignment operation, the following SOPs must run in order:
+  1. Lookup source and target entities
+  2. Lookup items to be transferred (if by name)
+  3. **Validation SOP (e.g., "Lookup Account Roster For Transfer")** - validates items belong to source
+  4. Final transfer/reassignment SOP
+- NEVER skip the validation SOP that runs between lookup and transfer
+- Example complete chain: Locate Source → Locate Target → Lookup Items → Validate Transfer → Execute Transfer
+
+**Common Multi-Workflow Patterns:**
+- Operation 1 + Operation 2: "Do X... Also Y..."
+- Analysis + Operation: "Understand/check/review... Then do..."
+- Multiple entity operations: "Update entity A... Also reassign entity B..."
+- Sequential workflows: "First X... Then also Y..."
+- Before + After: "Before finalizing... check X... Then Y"
+
+### 2. Check for Ambiguity
+
+- Could the instruction be interpreted in multiple ways?
+- Does it leave details unclear that would lead to DIFFERENT SOP chains?
+- CRITICAL: If primary chain confidence is >85%, mark as NOT ambiguous (is_ambiguous=false)
+- Only mark ambiguous if there are truly MULTIPLE REASONABLE interpretations
+
+### 3. Explain Reasoning
+
+- Why does this instruction map to this SOP chain?
+- What keywords/phrases indicate which SOPs to use?
+
+### 4. Alternative Interpretations (ONLY if ambiguous)
+
+- Only provide if is_ambiguous=true
+- Alternatives should have meaningful confidence (>30%)
+- Each alternative must represent a genuinely different interpretation
+- Confidence scores must be logically consistent:
+  * If primary is >85%: NO alternatives (not ambiguous)
+  * If primary is 60-85%: alternatives should be 40-60%
+  * If primary is <60%: alternatives could be 40-55%
+
+### 5. Missing Information Check
+
+**Check for Missing REQUIRED Parameters:**
+- Does instruction provide all parameters needed for the SOPs?
+- CRITICAL: Check if lookup SOPs will provide missing parameters
+  * If entity name given BUT no ID → NOT missing if lookup SOP exists in chain
+  * If lookup SOP will get the parameter → NOT missing
+- ONLY mark as missing if no SOP will provide it
+- ONLY generate suggested_fix if parameters are TRULY missing
+
+**If is_ambiguous=false:** set missing_information to empty list []
+
+### 6. Suggest a Fix (ONLY if ambiguous)
+
+- If is_ambiguous=false: set suggested_fix to null
+- If is_ambiguous=true: provide complete suggested_fix
+- Must be USER-FACING and NON-PROCEDURAL:
+  * Written in second person ("You are...", "You want to...")
+  * Describes WHAT, not HOW
+  * NO function names or API calls
+  * NO step-by-step instructions ("First...", "Then...")
+  * Natural, conversational language
+- Based on PRIMARY chain ONLY (not alternatives)
+- Don't add features not in primary chain
+- Keep same story, role, context - only add clarity
 
 ## Output Format
 
 {format_instructions}
 
-## Important Notes
+## Key Guidelines
 
-### Prerequisites vs SOPs
-- **Prerequisites** are setup steps that run BEFORE SOPs when needed:
-  - setup_python_environment
-  - get_configuration  
-  - configure_sec_api_identity
-  - validate_company_data_access
-- **SOPs** are high-level business operations (e.g., "SOP Pull Core Statements")
-- Your output should include BOTH prerequisites AND SOPs in the correct order
+### Confidence Score Logic
+- Primary >85%: Not ambiguous, no alternatives
+- Primary 60-85%: Ambiguous, alternatives 40-60%
+- Primary <60%: Multiple valid interpretations, alternatives 40-55%
+- Scores must be logically consistent
 
-### Standard Concepts (NOT ambiguous)
-- "Last N fiscal years" = most recent N fiscal years available in SEC data (deterministic)
-- "Normalize data" = apply standard financial normalization rules per policy (deterministic)
-- "Extract complete statements" = all three core statements (income, balance, cash flow)
-- Company ticker lookup, standard metrics, default units/scales are all deterministic
-
-### Confidence Score Logic (CRITICAL)
-- If primary chain confidence is >85%, set is_ambiguous=false and provide NO alternatives
-- If primary chain confidence is 60-85%, set is_ambiguous=true and alternatives should be 40-60%
-- If primary chain confidence is <60%, there may be multiple equally valid interpretations (alternatives 40-55%)
-- Confidence scores should be LOGICALLY CONSISTENT: 92% primary + 60% alternative = nonsense
-- Example GOOD: Primary 95% (not ambiguous, no alternatives)
-- Example GOOD: Primary 65%, Alternative 1: 50%, Alternative 2: 35% (ambiguous)
-- Example BAD: Primary 92%, Alternative 1: 60%, Alternative 2: 45% (illogical)
-
-### Ambiguity Sources (Real ambiguity ONLY)
-- Whether to create a spreadsheet template or just persist to DB (if instruction mentions "spreadsheet" or "template" ambiguously)
-- Whether to create time-series records in addition to normalized financials (if instruction mentions "time-series" or "tracking" ambiguously)
-- Whether additional validation steps beyond built-in checks are needed (if instruction is unclear about validation)
-- Custom assumptions vs policy defaults (if instruction mentions custom requirements)
-- Specific output format (if instruction mentions outputs ambiguously)
-- DON'T mark as ambiguous just because "we could also do X" - only if instruction genuinely unclear
-
-### General Guidelines
-- SOPs are high-level operations, typically 1-3 API calls each
-- A task concatenates 2-5 SOPs to achieve a goal
-- Tasks should be non-procedural (describe WHAT, not HOW)
-- Include parameters in SOP names when they help clarify intent
+### General Rules
+- SOPs are high-level operations (typically 1-3 API calls each)
+- Tasks concatenate 2-5 SOPs to achieve goals
+- Include parameters in SOP names when helpful
 - If instruction doesn't mention something, don't assume it's needed
+- Only mark ambiguous if instruction genuinely unclear (not just "we could also do X")
 """
     
     def __init__(self, llm: ChatOpenAI, domain: str, variation: str = "variation_2"):
@@ -308,10 +309,16 @@ Given a task instruction and available SOPs (Standard Operating Procedures), det
         content = re.sub(r'^```(?:json)?\s*', '', content)
         content = re.sub(r'```\s*$', '', content)
         
-        # Remove any explanation text after the JSON
-        # Find the last } and truncate everything after it
+        # Extract JSON object (remove text before and after)
+        # Find the first { and last } to isolate the JSON
+        first_brace = content.find('{')
         last_brace = content.rfind('}')
-        if last_brace != -1:
+        
+        if first_brace != -1 and last_brace != -1 and first_brace < last_brace:
+            # Extract just the JSON object
+            content = content[first_brace:last_brace + 1]
+        elif last_brace != -1:
+            # Fallback: just remove text after last brace
             content = content[:last_brace + 1]
         
         # Fix common JSON typos from reasoning models
