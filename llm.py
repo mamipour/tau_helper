@@ -166,29 +166,35 @@ def get_judge_llm(
     seed: int = 42,
 ) -> Optional[ChatOpenAI]:
     """
-    Get a judge LLM client using DEFAULT_MODEL_R_JUDGE config.
-    
-    The judge model evaluates outputs from R and R2 models and picks the best one
-    when they produce different scaffolds.
-    
+    Get a judge LLM client for mediating disagreements.
+
+    The judge model is used in two modes:
+    1. Multi-Agent Mode: Evaluates outputs from R and R2 models and picks the best one
+    2. Roundtable Mode: Mediates disagreements when R and R2 disagree in validation mode
+
+    Supports two environment variable patterns:
+    - DEFAULT_MODEL_JUDGE: For Roundtable Mode (R2 validation with judge mediation)
+    - DEFAULT_MODEL_R_JUDGE: For Multi-Agent Mode (both R and R2 generate, judge picks)
+
     Args:
-        model: Model name (defaults to DEFAULT_MODEL_R_JUDGE from .env)
-        api_key: API key (defaults to DEFAULT_API_KEY_R_JUDGE from .env)
-        base_url: API base URL (defaults to DEFAULT_BASE_URL_R_JUDGE from .env)
+        model: Model name (defaults to DEFAULT_MODEL_JUDGE or DEFAULT_MODEL_R_JUDGE from .env)
+        api_key: API key (defaults to DEFAULT_API_KEY_JUDGE or DEFAULT_API_KEY_R_JUDGE from .env)
+        base_url: API base URL (defaults to DEFAULT_BASE_URL_JUDGE or DEFAULT_BASE_URL_R_JUDGE from .env)
         temperature: Sampling temperature (default: 0.0)
         seed: Random seed for reproducibility (default: 42)
-    
+
     Returns:
         Configured ChatOpenAI instance, or None if judge config not available
     """
-    model = model or os.getenv("DEFAULT_MODEL_R_JUDGE")
-    api_key = api_key or os.getenv("DEFAULT_API_KEY_R_JUDGE")
-    base_url = base_url or os.getenv("DEFAULT_BASE_URL_R_JUDGE")
-    
-    # Return None if judge is not configured (multi-agent not enabled)
+    # Try roundtable mode env vars first, then fall back to multi-agent mode
+    model = model or os.getenv("DEFAULT_MODEL_JUDGE") or os.getenv("DEFAULT_MODEL_R_JUDGE")
+    api_key = api_key or os.getenv("DEFAULT_API_KEY_JUDGE") or os.getenv("DEFAULT_API_KEY_R_JUDGE")
+    base_url = base_url or os.getenv("DEFAULT_BASE_URL_JUDGE") or os.getenv("DEFAULT_BASE_URL_R_JUDGE")
+
+    # Return None if judge is not configured
     if not model or not api_key:
         return None
-    
+
     return get_llm_client(
         model=model,
         api_key=api_key,

@@ -57,12 +57,18 @@ class SOPMapping(BaseModel):
 
 class SOPMapper:
     """
-    Maps task instructions to SOP chains using LLM analysis.
-    
+    Maps task instructions to SOP chains using LLM analysis with roundtable validation.
+
+    Uses multi-agent roundtable:
+    - Model R proposes SOP chain
+    - Model R2 validates chain (checks for missing/incorrect SOPs)
+    - Model R responds to concerns (REVISE or PROCEED)
+    - Judge mediates disagreements
+
     Analyzes instructions against defined SOPs to determine execution paths,
     detect ambiguities, and explain different interpretations.
     """
-    
+
     MAPPING_PROMPT = """You are an expert at analyzing task instructions and mapping them to Standard Operating Procedures (SOPs).
 
 ## Your Task
@@ -205,23 +211,160 @@ Given a task instruction and available SOPs, determine:
 - If instruction doesn't mention something, don't assume it's needed
 - Only mark ambiguous if instruction genuinely unclear (not just "we could also do X")
 """
-    
-    def __init__(self, llm: ChatOpenAI, domain: str, variation: str = "variation_2"):
+
+    R2_VALIDATION_PROMPT = """You are R2, a validator checking if a proposed SOP chain is complete and correct.
+
+## Task Context
+
+**Instruction:** {instruction}
+
+**Domain Rules and Available SOPs:**
+{sops_description}
+
+**Proposed SOP Chain (from Model R):**
+{proposed_chain}
+
+**Reasoning from Model R:**
+{reasoning}
+
+## Your Validation Task
+
+The domain rules above contain Standard Operating Procedures (SOPs) that can be executed. SOPs may be defined in various formats - they might be explicitly labeled as "SOP [Name]", or they might be described as operational procedures, workflows, or process steps. Read the rules carefully to understand what operations are available.
+
+Check the proposed SOP chain for these issues:
+
+1. **Missing SOPs**: Does the instruction explicitly request operations NOT covered by the proposed chain?
+   - Read through the domain rules to identify available operational procedures
+   - Look for instruction keywords: "normalize", "persist", "store", "save", "export", "analyze", "aggregate", "validate", "transform", "extract", "pull", "create", "populate"
+   - Match instruction intent to available procedures in the rules, regardless of how they're formatted
+   - If instruction says "normalize the data", look for normalization/persistence procedures in the rules
+   - If instruction says "extract data", look for extraction/pull procedures in the rules
+   - Check if ALL explicitly requested operations have corresponding SOPs in the chain
+
+2. **Incorrect SOP Ordering**: Are the SOPs in the wrong order?
+   - Prerequisites must come before dependent SOPs
+   - Data fetch/extract before data transform/normalize
+   - Validate before persist
+
+3. **Missing Prerequisites**: Are required prerequisite SOPs missing?
+   - Check domain rules for required setup procedures
+
+4. **Extra/Unnecessary SOPs**: Are there SOPs that don't match the instruction?
+   - Only flag if clearly not requested
+
+## Response Format
+
+Return JSON:
+{{
+  "has_concerns": true/false,
+  "concerns": "Detailed list of concerns (bullet points). If no concerns, empty string.",
+  "severity": "high/medium/low" (high = missing critical SOPs, medium = ordering issues, low = minor improvements)
+}}
+
+**IMPORTANT**:
+- SOPs may be defined in various natural language formats - use semantic understanding to identify them
+- If instruction explicitly mentions an operation, search the rules for ANY procedure that performs that operation
+- Be strict about completeness - if relevant procedures exist in the rules, they should be included in the chain
+- Focus on what the instruction ASKS FOR, not on what Model R happened to propose
+"""
+
+    R_DECISION_PROMPT = """You are Model R, the primary SOP chain mapper.
+
+R2 Validator has raised concerns about your proposed SOP chain. You must decide:
+- **REVISE**: Acknowledge R2's concerns and provide a revised SOP chain
+- **PROCEED**: Explain why R2's concerns are invalid and you should proceed with the original chain
+
+## Context
+
+**Instruction:** {instruction}
+
+**Your Original SOP Chain:**
+{proposed_chain}
+
+**Your Original Reasoning:**
+{reasoning}
+
+**R2's Concerns:**
+{r2_concerns}
+
+## Your Decision
+
+Consider:
+1. Are R2's concerns valid based on the instruction?
+2. Did you miss an explicitly requested operation?
+3. Is the instruction genuinely ambiguous or did R2 misunderstand?
+
+Return JSON:
+{{
+  "decision": "REVISE" or "PROCEED",
+  "reasoning": "Explain your decision",
+  "revised_chain": {{
+    "sops": ["SOP 1", "SOP 2", ...],
+    "confidence": 0.0-1.0,
+    "reasoning": "Why this revised chain is better"
+  }} (only if decision is REVISE, otherwise null)
+}}
+"""
+
+    JUDGE_PROMPT = """You are a judge mediating a disagreement about an SOP chain mapping.
+
+## Roundtable Discussion
+
+**Model R (Primary Mapper)** proposed this SOP chain:
+{proposed_chain}
+
+R's Reasoning: {r_reasoning}
+
+**Model R2 (Validator)** raised these concerns:
+{r2_concerns}
+
+**Model R decided to PROCEED** (disagreed with R2), with this reasoning:
+{r_proceed_reasoning}
+
+## Task Context
+
+**Instruction:** {instruction}
+
+**Available SOPs:**
+{sops_description}
+
+## Your Decision
+
+You must decide who is correct. Consider:
+1. Does the instruction explicitly request operations that the chain is missing?
+2. Are there SOPs available that clearly match the instruction's intent?
+3. Is R's chain actually complete, or did R miss something obvious?
+4. Is R2 being overly strict, or are the concerns valid?
+
+Respond with ONLY one word:
+- "R" if Model R is correct and the chain is complete
+- "R2" if Model R2's concerns are valid and the chain needs revision
+
+Decision:"""
+
+    def __init__(self, llm: ChatOpenAI, domain: str, variation: str = "variation_2", llm_r2: ChatOpenAI = None, llm_judge: ChatOpenAI = None):
         """
-        Initialize SOP mapper.
-        
+        Initialize SOP mapper with roundtable validation.
+
         Args:
-            llm: LangChain ChatOpenAI instance
+            llm: LangChain ChatOpenAI instance (Model R - primary mapper)
             domain: Domain name (e.g., 'sec', 'airline')
             variation: Variation name (default: 'variation_2')
+            llm_r2: Optional LangChain ChatOpenAI for R2 validator
+            llm_judge: Optional LangChain ChatOpenAI for Judge (mediator)
         """
         self.llm = llm
+        self.llm_r2 = llm_r2
+        self.llm_judge = llm_judge
         self.domain = domain
         self.variation = variation
-        
+
+        # Roundtable mode enabled if R2 and Judge are provided
+        self.roundtable_enabled = llm_r2 is not None and llm_judge is not None
+
         # Load SOPs from rules.py
         self.sops = self._load_sops()
-        
+
         # Setup parser and prompt
         self.parser = PydanticOutputParser(pydantic_object=SOPMapping)
         self.prompt = ChatPromptTemplate.from_template(self.MAPPING_PROMPT)
@@ -254,14 +397,18 @@ Given a task instruction and available SOPs, determine:
             )
     
     def _format_sops_description(self) -> str:
-        """Format SOPs into a readable description for the prompt."""
+        """
+        Format SOPs/rules into a description for the prompt.
+
+        Returns the raw rules as-is, trusting the LLM to understand
+        the natural language definitions regardless of format.
+        """
         if not self.sops:
             return "No SOPs available (empty rules.py)"
-        
-        lines = []
-        
+
         # Handle different SOP formats
         if isinstance(self.sops, dict):
+            lines = []
             for name, sop in self.sops.items():
                 if isinstance(sop, dict):
                     description = sop.get('description', sop.get('name', name))
@@ -270,16 +417,13 @@ Given a task instruction and available SOPs, determine:
                     lines.append(f"- **{name}**: {sop}")
                 else:
                     lines.append(f"- **{name}**")
+            return "\n".join(lines)
         elif isinstance(self.sops, list):
-            for sop in self.sops:
-                if isinstance(sop, dict):
-                    name = sop.get('name', 'Unknown')
-                    description = sop.get('description', '')
-                    lines.append(f"- **{name}**: {description}")
-                else:
-                    lines.append(f"- {sop}")
-        
-        return "\n".join(lines) if lines else str(self.sops)
+            # For list format, join all rules as-is
+            # The LLM can identify SOPs from natural language context
+            return "\n\n".join(str(rule) for rule in self.sops if rule)
+        else:
+            return str(self.sops)
     
     def _clean_llm_response(self, content: str) -> str:
         """
@@ -332,44 +476,227 @@ Given a task instruction and available SOPs, determine:
         
         # Strip leading/trailing whitespace
         content = content.strip()
-        
+
         return content
-    
+
+    def _ask_r2_validator(self, instruction: str, proposed_chain: SOPChain) -> Dict[str, Any]:
+        """
+        Ask R2 to validate the proposed SOP chain.
+
+        Returns dict with:
+            - has_concerns: bool
+            - concerns: str
+            - severity: str
+        """
+        sops_description = self._format_sops_description()
+
+        prompt = ChatPromptTemplate.from_template(self.R2_VALIDATION_PROMPT)
+        messages = prompt.format_messages(
+            instruction=instruction,
+            sops_description=sops_description,
+            proposed_chain=", ".join(proposed_chain.sops),
+            reasoning=proposed_chain.reasoning
+        )
+
+        response = self.llm_r2.invoke(messages)
+        content = self._clean_llm_response(response.content)
+
+        try:
+            return json.loads(content)
+        except:
+            # If parsing fails, assume no concerns
+            return {"has_concerns": False, "concerns": "", "severity": "low"}
+
+    def _ask_model_r_decision(self, instruction: str, proposed_chain: SOPChain, r2_concerns: str) -> Dict[str, Any]:
+        """
+        Ask Model R to decide: REVISE or PROCEED after R2's concerns.
+
+        Returns dict with:
+            - decision: "REVISE" or "PROCEED"
+            - reasoning: str
+            - revised_chain: dict (if REVISE) or None
+        """
+        prompt = ChatPromptTemplate.from_template(self.R_DECISION_PROMPT)
+        messages = prompt.format_messages(
+            instruction=instruction,
+            proposed_chain=", ".join(proposed_chain.sops),
+            reasoning=proposed_chain.reasoning,
+            r2_concerns=r2_concerns
+        )
+
+        response = self.llm.invoke(messages)
+        content = self._clean_llm_response(response.content)
+
+        try:
+            return json.loads(content)
+        except:
+            # If parsing fails, default to PROCEED
+            return {"decision": "PROCEED", "reasoning": "Failed to parse response", "revised_chain": None}
+
+    def _consult_judge(self, instruction: str, proposed_chain: SOPChain, r2_concerns: str, r_proceed_reasoning: str) -> str:
+        """
+        Judge mediates disagreement between R and R2.
+
+        Returns:
+            "R" if R is correct, "R2" if R2's concerns are valid
+        """
+        sops_description = self._format_sops_description()
+
+        prompt = ChatPromptTemplate.from_template(self.JUDGE_PROMPT)
+        messages = prompt.format_messages(
+            instruction=instruction,
+            sops_description=sops_description,
+            proposed_chain=", ".join(proposed_chain.sops),
+            r_reasoning=proposed_chain.reasoning,
+            r2_concerns=r2_concerns,
+            r_proceed_reasoning=r_proceed_reasoning
+        )
+
+        response = self.llm_judge.invoke(messages)
+        decision = response.content.strip().upper()
+
+        # Validate decision
+        if "R2" in decision:
+            return "R2"
+        else:
+            return "R"
+
     def map_instruction(
-        self, 
+        self,
         instruction: str,
-        include_rules_context: bool = True
+        include_rules_context: bool = True,
+        verbose: bool = False
     ) -> SOPMapping:
         """
-        Map an instruction to SOP chains.
-        
+        Map an instruction to SOP chains with optional roundtable validation.
+
+        Roundtable flow (if enabled):
+        1. Model R proposes SOP chain
+        2. Model R2 validates (checks for missing/incorrect SOPs)
+        3. If R2 has concerns:
+           - Ask Model R to decide: REVISE or PROCEED
+           - If R decides PROCEED (disagrees with R2), Judge mediates
+           - Judge's decision is final
+        4. Return final chain
+
         Args:
             instruction: The task instruction to analyze
             include_rules_context: Whether to include full rules context
-            
+            verbose: Print roundtable discussion details
+
         Returns:
             SOPMapping with chain analysis
         """
-        # Format SOPs description
+        # Step 1: Model R proposes SOP chain
         sops_description = self._format_sops_description()
-        
-        # Format prompt
+
         formatted_prompt = self.prompt.format_messages(
             sops_description=sops_description,
             instruction=instruction,
             format_instructions=self.parser.get_format_instructions()
         )
-        
-        # Get LLM response
+
         response = self.llm.invoke(formatted_prompt)
-        
-        # Clean response (remove reasoning tags)
         cleaned_content = self._clean_llm_response(response.content)
-        
-        # Parse structured output
         mapping = self.parser.parse(cleaned_content)
-        
-        return mapping
+
+        # If roundtable mode disabled, return immediately
+        if not self.roundtable_enabled:
+            if verbose:
+                print(f"⚠️  SOP Mapper: Roundtable mode DISABLED (llm_r2={self.llm_r2 is not None}, llm_judge={self.llm_judge is not None})")
+            return mapping
+
+        # Step 2: Roundtable validation
+        if verbose:
+            print(f"\n🔍 R2 Validator: Checking proposed SOP chain...")
+            print(f"   Proposed chain: {', '.join(mapping.primary_chain.sops)}")
+
+        r2_result = self._ask_r2_validator(instruction, mapping.primary_chain)
+
+        if not r2_result.get("has_concerns", False):
+            if verbose:
+                print(f"✓ R2 Validator: No concerns identified")
+            return mapping
+
+        # Step 3: R2 has concerns - ask Model R to decide
+        r2_concerns = r2_result.get("concerns", "")
+        severity = r2_result.get("severity", "medium")
+
+        if verbose:
+            print(f"⚠️  R2 Validator identified concerns ({severity} severity):")
+            for line in r2_concerns.split("\n"):
+                if line.strip():
+                    print(f"   {line}")
+            print(f"\n💭 Asking Model R to decide: REVISE or PROCEED...")
+
+        r_decision_result = self._ask_model_r_decision(instruction, mapping.primary_chain, r2_concerns)
+        decision = r_decision_result.get("decision", "PROCEED")
+        r_reasoning = r_decision_result.get("reasoning", "")
+
+        if decision == "REVISE":
+            # Model R agreed with R2's concerns and provided revision
+            if verbose:
+                print(f"✓ Model R decided to REVISE based on R2's feedback")
+
+            revised_chain_dict = r_decision_result.get("revised_chain")
+            if revised_chain_dict and revised_chain_dict.get("sops"):
+                revised_chain = SOPChain(
+                    sops=revised_chain_dict["sops"],
+                    confidence=revised_chain_dict.get("confidence", mapping.primary_chain.confidence),
+                    reasoning=revised_chain_dict.get("reasoning", "")
+                )
+                mapping.primary_chain = revised_chain
+
+                if verbose:
+                    print(f"   Revised chain: {', '.join(revised_chain.sops)}")
+
+            return mapping
+
+        # Step 4: Model R decided PROCEED (disagreed with R2) - consult Judge
+        if verbose:
+            print(f"⚠️ Model R decided to PROCEED with original chain (disagreed with R2)")
+            print(f"   R's reasoning: {r_reasoning}")
+            print(f"\n🏛️ Consulting Judge to resolve disagreement...")
+
+        judge_decision = self._consult_judge(instruction, mapping.primary_chain, r2_concerns, r_reasoning)
+
+        if judge_decision == "R":
+            # Judge sided with R - proceed with original chain
+            if verbose:
+                print(f"  ✓ Judge sided with R - proceeding with original chain")
+            return mapping
+        else:
+            # Judge sided with R2 - force revision
+            if verbose:
+                print(f"  ✓ Judge sided with R2 - chain needs revision")
+                print(f"  🔄 Forcing Model R to provide revised chain...")
+
+            # Ask R again with judge's backing
+            forced_prompt = f"""The Judge has reviewed the disagreement and sided with R2's concerns.
+
+You MUST revise your SOP chain to address these concerns:
+{r2_concerns}
+
+The Judge has determined these concerns are valid and must be addressed."""
+
+            r_forced_result = self._ask_model_r_decision(instruction, mapping.primary_chain, forced_prompt)
+
+            revised_chain_dict = r_forced_result.get("revised_chain")
+            if revised_chain_dict and revised_chain_dict.get("sops"):
+                revised_chain = SOPChain(
+                    sops=revised_chain_dict["sops"],
+                    confidence=revised_chain_dict.get("confidence", mapping.primary_chain.confidence),
+                    reasoning=revised_chain_dict.get("reasoning", "Judge-mandated revision")
+                )
+                mapping.primary_chain = revised_chain
+
+                if verbose:
+                    print(f"    ✓ Model R provided revised chain: {', '.join(revised_chain.sops)}")
+            else:
+                if verbose:
+                    print(f"    ⚠️ Model R failed to provide valid revision - keeping original chain")
+
+            return mapping
     
     def map_task(
         self, 

@@ -5,7 +5,9 @@ Main CLI entry point for Tau-Helper: Warrior Tau-Bench Helper Tools.
 Provides various commands for task creation, validation, and management.
 """
 
+import os
 import click
+from typing import List, Dict, Any
 from rich.console import Console
 from rich.panel import Panel
 from rich.syntax import Syntax
@@ -633,184 +635,6 @@ def _display_sop_mapping(instruction: str, mapping, console):
 
 
 @cli.command()
-@click.argument("domain")
-@click.option("--variation", required=True, help="Variation name (e.g., variation_2)")
-@click.option("--instruction", help="Task instruction (if not using --task)")
-@click.option("--task", help="Task ID to scaffold from (e.g., task_001)")
-@click.option("--task-id", default="task_new", help="Task ID for generated task (default: task_new)")
-@click.option("--no-execute", is_flag=True, help="Generate scaffold without executing actions")
-@click.option("--model", help="Override LLM model for scaffolding")
-@click.option("--max-retries", default=3, type=int, help="Maximum retry attempts if generation fails (default: 3)")
-@click.option("--verbose", is_flag=True, help="Show detailed progress logs")
-def scaffold(domain, variation, instruction, task, task_id, no_execute, model, max_retries, verbose):
-    """
-    Generate a complete task scaffold from an instruction.
-    
-    Uses SOP mapping to generate action sequences, then executes actions
-    incrementally to fill placeholders with real values.
-    
-    Examples:
-    
-        # Scaffold from instruction
-        tau_helper scaffold sec --variation variation_2 \\
-          --instruction "Extract Apple's financial data"
-        
-        # Scaffold from existing task (re-generate)
-        tau_helper scaffold sec --variation variation_2 --task task_001
-        
-        # Generate without executing (placeholders remain)
-        tau_helper scaffold sec --variation variation_2 \\
-          --instruction "Calculate WACC for Tesla" --no-execute
-    """
-    from .llm import get_llm_client, get_reasoning_llm
-    from .task_scaffolder import TaskScaffolder
-    
-    console.print(f"[bold]Domain:[/bold] {domain}, [bold]Variation:[/bold] {variation}")
-    
-    # Get instruction
-    if task and not instruction:
-        # Load instruction from task
-        try:
-            from .action_executor import ActionExecutor
-            executor = ActionExecutor(domain, variation)
-            tasks = executor.get_available_tasks()
-            if task not in tasks:
-                console.print(f"[red]Error:[/red] Task '{task}' not found")
-                return
-            instruction = tasks[task].instruction
-            console.print(f"\n[dim]Loaded instruction from {task}[/dim]")
-        except Exception as e:
-            console.print(f"[red]Error loading task:[/red] {e}")
-            return
-    
-    if not instruction:
-        console.print("[red]Error:[/red] Must provide --instruction or --task")
-        return
-    
-    # Initialize LLM(s)
-    from .llm import is_multi_agent_enabled, get_reasoning_llm_r2, get_judge_llm
-    
-    try:
-        if model:
-            llm = get_llm_client(model=model)
-        else:
-            # Use regular model with temperature=0 for deterministic scaffold generation
-            # Reasoning models are too unpredictable for generating concrete values
-            llm = get_llm_client(temperature=0.0, seed=42)
-        
-        # Check if multi-agent is enabled
-        llm_r2 = None
-        llm_judge = None
-        if is_multi_agent_enabled():
-            console.print("[dim]🤖 Multi-agent mode enabled[/dim]")
-            llm_r2 = get_reasoning_llm_r2()
-            llm_judge = get_judge_llm()
-            
-    except Exception as e:
-        console.print(f"[red]Error initializing LLM:[/red] {e}")
-        return
-    
-    # Initialize scaffolder
-    try:
-        scaffolder = TaskScaffolder(
-            llm, 
-            domain, 
-            variation,
-            llm_r2=llm_r2,
-            llm_judge=llm_judge
-        )
-    except Exception as e:
-        console.print(f"[red]Error initializing scaffolder:[/red] {e}")
-        return
-    
-    # Generate scaffold
-    console.print(f"\n[bold cyan]{'='*80}[/bold cyan]")
-    console.print(f"[bold green]Task Scaffolding[/bold green]")
-    console.print(f"[bold cyan]{'='*80}[/bold cyan]\n")
-    
-    console.print(f"[bold]Instruction:[/bold]\n{instruction}\n")
-    
-    execute = not no_execute
-    scaffold_result, error, progress, model_info = scaffolder.scaffold(
-        instruction=instruction,
-        task_id=task_id,
-        execute=execute,
-        max_retries=max_retries
-    )
-    
-    # Show progress only if verbose or error occurred
-    if verbose or error:
-        for msg in progress:
-            console.print(msg)
-    
-    # Show result or error
-    if error:
-        console.print(f"\n[bold red]Scaffolding Failed[/bold red]")
-        console.print(f"[red]{error}[/red]")
-        return
-    
-    # Display scaffold
-    console.print(f"\n[bold cyan]{'='*80}[/bold cyan]")
-    console.print(f"[bold green]Generated Task Scaffold[/bold green]")
-    console.print(f"[bold cyan]{'='*80}[/bold cyan]\n")
-    
-    # Format as Python code
-    python_code = _format_task_as_python(scaffold_result)
-    
-    syntax = Syntax(python_code, "python", theme="monokai", line_numbers=True)
-    console.print(syntax)
-    
-    console.print(f"\n[bold green]✅ Scaffold generation complete![/bold green]")
-    console.print(f"[dim]Copy the above code to add this task to tasks.py[/dim]")
-    
-    # Show model selection summary
-    if model_info:
-        console.print(f"\n[dim]Model: {model_info}[/dim]")
-
-
-def _format_task_as_python(scaffold) -> str:
-    """Format TaskScaffold as Python code matching tasks.py format."""
-    lines = []
-    lines.append("Task(")
-    lines.append('    annotator="human",')
-    lines.append(f'    user_id="{scaffold.user_id}",')
-    lines.append(f'    instruction="{scaffold.instruction}",')
-    lines.append('    actions=[')
-    
-    for action in scaffold.actions:
-        if action.comment:
-            lines.append(f'        # {action.comment}')
-        
-        # Format kwargs
-        kwargs_str = "{"
-        for i, (key, value) in enumerate(action.kwargs.items()):
-            if i > 0:
-                kwargs_str += ", "
-            kwargs_str += f'"{key}": {repr(value)}'
-        kwargs_str += "}"
-        
-        lines.append(f'        Action(')
-        lines.append(f'            name="{action.name}",')
-        lines.append(f'            kwargs={kwargs_str},')
-        lines.append(f'        ),')
-    
-    lines.append('    ],')
-    
-    # Outputs (already formatted strings with quotes)
-    if scaffold.outputs:
-        # Each output is already a formatted string like '"key": value'
-        # Wrap with single quotes to create valid Python list of strings
-        outputs_str = "[" + ", ".join([f"'{o}'" for o in scaffold.outputs]) + "]"
-    else:
-        outputs_str = "[]"
-    lines.append(f'    outputs={outputs_str},')
-    
-    lines.append('),')
-    
-    return "\n".join(lines)
-
-
-@cli.command()
 @click.option("--domain", help="Show variations for specific domain")
 def list_domains(domain):
     """
@@ -891,6 +715,206 @@ def info():
     Run 'python tau_helper/run.py --help' for available commands
     """
     console.print(Panel(info_text, box=box.ROUNDED, border_style="cyan"))
+
+
+@cli.command()
+@click.argument("domain")
+@click.option("--variation", required=True, help="Variation name (e.g., variation_2)")
+@click.option("--instruction", help="Task instruction (if not using --task)")
+@click.option("--task", help="Task ID to get instruction from (e.g., task_001)")
+@click.option("--task-id", default="task_new", help="Task ID for generated task (default: task_new)")
+@click.option("--model", help="Override LLM model for scaffolding")
+@click.option("--max-actions", default=100, type=int, help="Maximum actions to prevent infinite loops (default: 100)")
+@click.option("--verbose", is_flag=True, help="Show detailed progress logs including execution results")
+def scaffold(domain, variation, instruction, task, task_id, model, max_actions, verbose):
+    """
+    Generate a complete task scaffold from an instruction using iterative execution.
+
+    This approach generates ONE action at a time, executes it immediately,
+    and feeds the result back to the agent for the next action. This eliminates
+    placeholders and allows the agent to adapt based on actual execution results.
+
+    Supports multi-agent mode (Model R + R2 + Judge) when configured in .env.
+
+    Examples:
+
+        # Scaffold from instruction
+        python tau_helper/run.py scaffold salesforce_performance_management \\
+          --variation variation_2 \\
+          --instruction "Transfer BlueCurve Analytics from Ava Lopez to Chris Sullivan"
+
+        # Scaffold from existing task instruction
+        python tau_helper/run.py scaffold salesforce_performance_management \\
+          --variation variation_2 --task task_001
+
+        # With verbose output to see execution results
+        python tau_helper/run.py scaffold sec \\
+          --variation variation_2 --task task_001 --verbose
+    """
+    from .llm import get_llm_client, is_multi_agent_enabled, get_reasoning_llm_r2, get_judge_llm
+    from .iterative_scaffolder import IterativeScaffolder
+
+    console.print(f"[bold]Domain:[/bold] {domain}, [bold]Variation:[/bold] {variation}")
+    console.print(f"[bold cyan]🚀 Iterative Scaffolding Mode[/bold cyan] - Actions generated step-by-step with real execution\n")
+
+    # Get instruction
+    if task and not instruction:
+        # Load instruction from task
+        try:
+            from .action_executor import ActionExecutor
+            executor = ActionExecutor(domain, variation)
+            tasks = executor.get_available_tasks()
+            if task not in tasks:
+                console.print(f"[red]Error:[/red] Task '{task}' not found")
+                return
+            instruction = tasks[task].instruction
+            console.print(f"[dim]Loaded instruction from {task}[/dim]\n")
+        except Exception as e:
+            console.print(f"[red]Error loading task:[/red] {e}")
+            return
+
+    if not instruction:
+        console.print("[red]Error:[/red] Must provide --instruction or --task")
+        return
+
+    # Initialize LLM(s)
+    try:
+        if model:
+            llm = get_llm_client(model=model)
+        else:
+            # Use temperature=0 for more deterministic scaffolding
+            llm = get_llm_client(temperature=0.0, seed=42)
+
+        # Check if multi-agent is enabled
+        llm_r2 = None
+        llm_judge = None
+        if is_multi_agent_enabled():
+            console.print("[bold cyan]🤖 Multi-agent mode enabled[/bold cyan]")
+            console.print("[dim]Model R and R2 will generate actions independently, Judge will resolve conflicts[/dim]\n")
+            llm_r2 = get_reasoning_llm_r2()
+            llm_judge = get_judge_llm()
+        elif os.getenv('DEFAULT_MODEL_R2'):
+            # R2 validation mode (R2 exists, optionally with judge for roundtable)
+            console.print("[bold green]🔍 R2 Validation mode enabled[/bold green]")
+            llm_r2 = get_reasoning_llm_r2()
+
+            # Load judge if available for roundtable discussion
+            if os.getenv('DEFAULT_MODEL_JUDGE'):
+                llm_judge = get_judge_llm()
+                console.print("[dim]Model R generates actions, R2 validates, Judge mediates disagreements (roundtable mode)[/dim]\n")
+            else:
+                console.print("[dim]Model R generates actions, R2 validates for hallucinations and rule violations[/dim]\n")
+        else:
+            console.print("[dim]Single model mode (configure R2 in .env for validation, R2+Judge for multi-agent)[/dim]\n")
+
+    except Exception as e:
+        console.print(f"[red]Error initializing LLM:[/red] {e}")
+        return
+
+    # Initialize iterative scaffolder
+    try:
+        scaffolder = IterativeScaffolder(
+            domain=domain,
+            variation=variation,
+            llm=llm,
+            llm_r2=llm_r2,
+            llm_judge=llm_judge
+        )
+    except Exception as e:
+        console.print(f"[red]Error initializing scaffolder:[/red] {e}")
+        return
+
+    # Generate scaffold iteratively
+    console.print(f"[bold cyan]{'='*80}[/bold cyan]")
+    console.print(f"[bold green]Iterative Task Scaffolding[/bold green]")
+    console.print(f"[bold cyan]{'='*80}[/bold cyan]\n")
+
+    console.print(f"[bold]Instruction:[/bold]")
+    console.print(f"{instruction}\n")
+
+    with console.status("[bold blue]Generating task actions iteratively..."):
+        actions, error, progress, model_info = scaffolder.scaffold(
+            instruction=instruction,
+            task_id=task_id,
+            max_actions=max_actions,
+            verbose=verbose
+        )
+
+    # Show progress only if verbose or error occurred
+    if verbose or error:
+        console.print("\n[bold]Execution Log:[/bold]")
+        for msg in progress:
+            console.print(msg)
+    else:
+        # Show only summary
+        # Count successes
+        success_count = sum(1 for msg in progress if "✓ Success" in msg)
+        retry_count = sum(1 for msg in progress if "🔄 Retry" in msg)
+        consensus_count = sum(1 for msg in progress if "✓ Consensus" in msg)
+
+        console.print(f"\n[dim]Generated {success_count} actions " +
+                     (f"({retry_count} with retries)" if retry_count > 0 else "") +
+                     (f" | {consensus_count} consensus" if consensus_count > 0 else "") +
+                     "[/dim]")
+
+    # Show result or error
+    if error:
+        console.print(f"\n[bold red]Scaffolding Failed[/bold red]")
+        console.print(f"[red]{error}[/red]")
+        if not verbose:
+            console.print(f"[dim]Run with --verbose to see detailed error logs[/dim]")
+        return
+
+    # Display generated task
+    console.print(f"\n[bold cyan]{'='*80}[/bold cyan]")
+    console.print(f"[bold green]Generated Task (Ready to Use)[/bold green]")
+    console.print(f"[bold cyan]{'='*80}[/bold cyan]\n")
+
+    # Format as Python code
+    python_code = _format_iterative_task_as_python(task_id, instruction, actions)
+
+    syntax = Syntax(python_code, "python", theme="monokai", line_numbers=True)
+    console.print(syntax)
+
+    console.print(f"\n[bold green]✅ Iterative scaffolding complete![/bold green]")
+    console.print(f"[bold green]Generated {len(actions)} actions with REAL values (no placeholders!)[/bold green]")
+    console.print(f"[dim]Copy the above code to add this task to tasks.py[/dim]")
+
+    # Show model selection summary
+    if model_info:
+        console.print(f"\n[dim]Model Strategy: {model_info}[/dim]")
+
+
+def _format_iterative_task_as_python(task_id: str, instruction: str, actions: List[Dict[str, Any]]) -> str:
+    """Format iteratively generated actions as Python code matching tasks.py format."""
+    lines = []
+    lines.append("Task(")
+    lines.append('    annotator="human",')
+    lines.append(f'    user_id="{task_id}",')
+    lines.append(f'    instruction="{instruction}",')
+    lines.append('    actions=[')
+
+    for action in actions:
+        # Add SOP comment if available
+        if action.get('sop_step'):
+            lines.append(f'        # {action["sop_step"]}')
+        elif action.get('reasoning'):
+            lines.append(f'        # {action["reasoning"][:80]}')
+
+        # Format kwargs
+        import json
+        kwargs_str = json.dumps(action['kwargs'])
+
+        lines.append(f'        Action(')
+        lines.append(f'            name="{action["name"]}",')
+        lines.append(f'            kwargs={kwargs_str},')
+        lines.append(f'        ),')
+
+    lines.append('    ],')
+    lines.append('    outputs=[],')
+    lines.append('),')
+
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":
