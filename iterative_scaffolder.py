@@ -1415,25 +1415,66 @@ Please provide a revised action that properly addresses these issues."""
                             "sop_step": next_action.sop_step
                         })
 
-                        # Ask agent to fix
-                        self._log(f"🔄 Asking agent to use correct tool name...", progress, verbose)
-                        if self.multi_agent_enabled:
-                            next_action, step_progress, step_model_info = self._generate_next_action_multi_agent(
-                                instruction, sop_chain, execution_history, len(sop_chain), completed_sops, len(actions)
-                            )
-                            model_info = step_model_info
-                        else:
-                            next_action, step_progress, repetition_warning = self._generate_next_action(
-                                instruction, sop_chain, execution_history, len(sop_chain), completed_sops, len(actions)
-                            )
-                        progress.extend(step_progress)
-                        execution_history.pop()  # Remove error entry
+                        # Keep the error in execution history so agent can learn from it
+                        # Don't pop the error - keep it in history for the agent to learn from
+                        # This ensures the agent sees the validation error on subsequent iterations
+                        # if it continues to make the same mistake
 
-                        # Validate again
-                        if next_action.action_name not in available_tool_names:
-                            error = f"Agent still using invalid tool name after correction: {next_action.action_name}"
-                            self._log(f"❌ {error}", progress, verbose)
-                            return None, error, progress, model_info
+                        # Increment failure counter to prevent infinite loops
+                        consecutive_failures += 1
+
+                        # Circuit breaker: force completion if too many validation failures
+                        if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                            self._log(
+                                f"\n⚠️ Circuit breaker triggered: {consecutive_failures} consecutive validation failures",
+                                progress, verbose)
+                            self._log(
+                                f"  Agent keeps using invalid tool names. Forcing completion with current progress.",
+                                progress, verbose)
+                            break
+
+                        # Skip this action and continue to next iteration
+                        # The error remains in execution_history so the agent can see it
+                        self._log(
+                            f"  Skipping this action. Agent will see the validation error on next iteration.",
+                            progress, verbose)
+                        continue
+                    else:
+                        # Invalid tool name that doesn't match any SOP
+                        validation_error = (
+                            f"Invalid action_name: '{next_action.action_name}' is not a valid tool name!\n"
+                            f"Available tools: {', '.join(available_tool_names[:10])}...\n"
+                            f"Check the SOP Definitions or Available Tools section to find the correct tool name."
+                        )
+                        self._log(f"⚠️ Validation error: {validation_error}", progress, verbose)
+
+                        # Add validation error to execution history
+                        execution_history.append({
+                            "action_num": action_num,
+                            "action": next_action.action_name,
+                            "kwargs": next_action.action_kwargs,
+                            "error": validation_error,
+                            "sop_step": next_action.sop_step
+                        })
+
+                        # Increment failure counter
+                        consecutive_failures += 1
+
+                        # Circuit breaker
+                        if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                            self._log(
+                                f"\n⚠️ Circuit breaker triggered: {consecutive_failures} consecutive validation failures",
+                                progress, verbose)
+                            self._log(
+                                f"  Agent keeps using invalid tool names. Forcing completion with current progress.",
+                                progress, verbose)
+                            break
+
+                        # Skip this action and continue to next iteration
+                        self._log(
+                            f"  Skipping this action. Agent will see the validation error on next iteration.",
+                            progress, verbose)
+                        continue
 
                 # Check if task is done before executing
                 if next_action.done:
