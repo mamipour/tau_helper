@@ -1,6 +1,23 @@
 # Tau-Helper: Tau-Bench Helper Library
 
-A comprehensive toolkit for creating, validating, and managing tasks, tools, and SOPs across all Warrior Tau-Bench domains.
+A comprehensive toolkit for creating, validating, and managing tasks, tools, and SOPs for **[Tau2-Bench](https://github.com/sierra-research/tau2-bench)** domains.
+
+## Philosophy
+
+When you have the **perfect combination** of:
+- ✅ A complete, well-designed **tool set**
+- ✅ Clear, comprehensive **domain rules**
+- ✅ High-quality, unambiguous **instructions**
+
+...there should be **only ONE path** to achieve the ground truth.
+
+**Tau-Helper accelerates domain development** by helping you:
+1. **Validate instructions** for quality and clarity
+2. **Map instructions to SOPs** and detect ambiguity
+3. **Generate ground truth tasks** automatically through iterative execution
+4. **Debug and verify** task execution
+
+This ensures your domains provide deterministic, high-quality benchmarks for agent evaluation.
 
 > **📌 Cursor IDE Users**: This directory includes `.cursorrules` for AI assistant integration. The file is automatically loaded by Cursor to help you work with this library.
 
@@ -44,10 +61,12 @@ DEFAULT_BASE_URL_R=https://api.openai.com/v1
 # - If they differ, JUDGE picks the best one
 # - Improves quality through model consensus
 
+# R2 Model: Can use stronger OpenAI models like gpt-5-mini, gpt-4o, etc.
 DEFAULT_MODEL_R2=gpt-5-mini
 DEFAULT_API_KEY_R2=your-openai-api-key
 DEFAULT_BASE_URL_R2=https://api.openai.com/v1
 
+# Judge Model: Reasoning models work well (DeepSeek R1, etc.)
 DEFAULT_MODEL_R_JUDGE=deepseek-ai/DeepSeek-R1-0528
 DEFAULT_API_KEY_R_JUDGE=your-friendli-api-key
 DEFAULT_BASE_URL_R_JUDGE=https://api.friendli.ai/serverless/v1
@@ -118,20 +137,19 @@ python ../tau_helper/run.py map-sop sec --variation variation_2 --task task_001 
 ### Task Scaffolder
 
 ```bash
-# IMPORTANT: Execution mode is in development
-# Generate task with placeholders (no-execute mode)
+# Generate task from custom instruction (iterative execution with real values)
 python ../tau_helper/run.py scaffold <domain> --variation <variation> --instruction "Your instruction"
 
-# Generate task from existing task (re-scaffold with placeholders)
+# Generate task from existing task instruction
 python ../tau_helper/run.py scaffold <domain> --variation <variation> --task <task_id>
 
 # Specify custom task ID
 python ../tau_helper/run.py scaffold <domain> --variation <variation> --instruction "..." --task-id task_new_001
 
-# Configure max retries (default: 3)
-python ../tau_helper/run.py scaffold <domain> --variation <variation> --instruction "..." --max-retries 5
+# Configure max actions limit (default: 100, prevents infinite loops)
+python ../tau_helper/run.py scaffold <domain> --variation <variation> --instruction "..." --max-actions 150
 
-# Show detailed progress (or auto-show on error)
+# Show detailed progress including execution results
 python ../tau_helper/run.py scaffold <domain> --variation <variation> --instruction "..." --verbose
 
 # Examples
@@ -140,16 +158,16 @@ python ../tau_helper/run.py scaffold salesforce_management --variation variation
 ```
 
 **Task Scaffolder Features:**
+- **Iterative execution**: Generates ONE action at a time, executes it immediately, feeds result to agent
+- **Real values only**: No placeholders! Uses actual values from execution results
 - Maps instruction to SOP chain (reuses `map-sop` logic)
-- Generates action sequence with placeholders (`{{query_single_user_record_output.Id}}`, `{{account_ids}}`)
-- **Automatic retry logic**: Retries up to 3 times (configurable) if generation fails
-- Shows progress and identifies missing values
-- Outputs complete task in `tasks.py` format (ready to copy-paste)
+- Resets database before execution for clean state
+- Adapts based on execution feedback (errors, results)
+- Outputs complete task in `tasks.py` format with real, executable values
 - **Model transparency**: Shows which model(s) generated the output:
-  - `Model: Single Model` - Default single model mode
-  - `Model: Consensus (R + R2)` - Both models agreed
-  - `Model: Judge → Model R` or `Model: Judge → Model R2` - Judge resolved disagreement
-  - `Model: Model R (R2 failed)` - Fallback to R after R2 failure
+  - `Single Model` - Default single model mode
+  - `Consensus (R + R2)` - Both models agreed
+  - `Judge → Model R` or `Judge → Model R2` - Judge resolved disagreement
 
 **🤖 Advanced Feature: Multi-Agent Architecture**
 
@@ -167,10 +185,10 @@ When `DEFAULT_MODEL_R2` and `DEFAULT_MODEL_R_JUDGE` are configured in `.env`, sc
 - **Automatic fallback**: System degrades gracefully if one model fails
 
 **Recommended Models:**
-- **R2**: `meta-llama-3.3-70b-instruct`, `deepseek-ai/DeepSeek-V3`, or other instruction-tuned models
-- **Judge**: `deepseek-ai/DeepSeek-R1-0528` (reasoning model works well for evaluation)
+- **R2**: OpenAI models like `gpt-5-mini`, `gpt-4o`, or stronger reasoning models
+- **Judge**: `deepseek-ai/DeepSeek-R1-0528` or other reasoning models (good for evaluation)
 
-**Note**: Models must support structured JSON output.
+**Note**: All models must support structured JSON output.
 
 ### Action Executor
 
@@ -296,27 +314,22 @@ python ../tau_helper/run.py map-sop salesforce_management --variation variation_
 # Step 3: Evaluate the fixed instruction again
 python ../tau_helper/run.py evaluate "FIXED_INSTRUCTION_HERE"
 
-# Step 4: Scaffold with no-execute (generates task with {{placeholders}})
-python ../tau_helper/run.py scaffold salesforce_management --variation variation_2 --instruction "..." --task-id task_006 --no-execute
+# Step 4: Scaffold with iterative execution (generates task with REAL values)
+python ../tau_helper/run.py scaffold salesforce_management --variation variation_2 --instruction "..." --task-id task_006 --verbose
 
 # Step 5: Copy the scaffolded code to tasks.py
+# The code already contains real values from execution - no manual filling needed!
 
-# Step 6: Fill placeholders by executing actions one by one
-python ../tau_helper/run.py execute salesforce_management --variation variation_2 --task task_006 --all-actions
-
-# Step 7: Manually replace {{placeholders}} in tasks.py with actual values from execution
-# (Use the output from Step 6 to fill in the deterministic values)
-
-# Step 8: Validate the completed task
+# Step 6: Validate the completed task
 uv run alignerr validate --domain salesforce_management --variation variation_2 --task-id task_006
 ```
 
 **Why this workflow?**
 - **Step 1-3**: Ensures instruction is high quality, user-facing, and non-procedural
 - **Step 2**: Detects missing information before scaffolding
-- **Step 4**: Generates the action sequence structure
-- **Step 6-7**: Fills in deterministic values from actual tool execution
-- **Step 8**: Validates the final task works correctly
+- **Step 4**: Generates actions iteratively with real execution, producing ready-to-use code
+- **Step 5**: Copy-paste the output - it's already complete with real values!
+- **Step 6**: Validates the final task works correctly
 
 ### 2. Validate Task Instructions
 ```bash

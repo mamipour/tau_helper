@@ -1,5 +1,9 @@
 # Quick Start Guide
 
+**Tau-Helper** accelerates domain development for **[Tau2-Bench](https://github.com/sierra-research/tau2-bench)** by helping you create high-quality, deterministic ground truth tasks.
+
+With perfect tools, rules, and instructions → there's only ONE path to ground truth. Tau-Helper gets you there faster.
+
 > **📌 Cursor IDE Users**: This directory includes `.cursorrules` for AI assistant integration.
 
 ## Recommended Setup
@@ -54,15 +58,17 @@ DEFAULT_API_KEY=your-openai-api-key
 DEFAULT_BASE_URL=https://api.openai.com/v1
 
 # Reasoning model (for SOP mapping and scaffolding)
-DEFAULT_MODEL_R=gpt-5-mini
+DEFAULT_MODEL_R=gpt-4o-mini
 DEFAULT_API_KEY_R=your-openai-api-key
 DEFAULT_BASE_URL_R=https://api.openai.com/v1
 
 # Optional: Multi-Agent Architecture (for better scaffolding)
-DEFAULT_MODEL_R2=meta-llama-3.3-70b-instruct
-DEFAULT_API_KEY_R2=your-friendli-api-key
-DEFAULT_BASE_URL_R2=https://api.friendli.ai/serverless/v1
+# R2 Model: Can use stronger OpenAI models
+DEFAULT_MODEL_R2=gpt-5-mini
+DEFAULT_API_KEY_R2=your-openai-api-key
+DEFAULT_BASE_URL_R2=https://api.openai.com/v1
 
+# Judge Model: Reasoning models work well for evaluation
 DEFAULT_MODEL_R_JUDGE=deepseek-ai/DeepSeek-R1-0528
 DEFAULT_API_KEY_R_JUDGE=your-friendli-api-key
 DEFAULT_BASE_URL_R_JUDGE=https://api.friendli.ai/serverless/v1
@@ -130,16 +136,16 @@ python ../tau_helper/run.py scaffold sec --variation variation_2 --task task_001
 python ../tau_helper/run.py scaffold sec --variation variation_2 \
   --instruction "Extract Apple's last 3 fiscal years of financial statements"
 
-# With verbose output
+# With verbose output (shows execution details)
 python ../tau_helper/run.py scaffold sec --variation variation_2 --task task_001 --verbose
 ```
 
 **Features:**
 - Maps instruction → SOP chain
-- Generates action sequence with placeholders
-- Executes actions incrementally
-- Fills placeholders from tool outputs
-- Outputs ready-to-use task code
+- **Iterative execution**: Generates ONE action at a time, executes immediately
+- **Real values only**: No placeholders! Uses actual execution results
+- Adapts based on execution feedback (errors, results)
+- Outputs ready-to-use task code with real values
 
 ### 6. Execute Task Actions (Testing)
 
@@ -184,15 +190,17 @@ cd warrior-tau-bench
 # 1. Write your instruction
 INSTRUCTION="You are a financial analyst. Extract Tesla's income statements for the last 3 years."
 
-# 2. Generate the scaffold
+# 2. Generate the scaffold (executes iteratively with real values)
 python ../tau_helper/run.py scaffold sec --variation variation_2 \
   --instruction "$INSTRUCTION" \
-  --task-id task_new_042
+  --task-id task_new_042 \
+  --verbose
 
 # 3. Copy the output to tasks.py
+# The code already contains real values - ready to use!
 
-# 4. Test it
-python ../tau_helper/run.py execute sec --variation variation_2 --task task_new_042
+# 4. Validate it
+uv run alignerr validate --domain sec --variation variation_2 --task-id task_new_042
 ```
 
 ### Improving Instruction Quality
@@ -254,8 +262,9 @@ pip install -r tau_helper/requirements.txt
 ### Scaffold generation fails
 
 1. Check if multi-agent models are misconfigured in `.env`
-2. Try with `--verbose` to see detailed logs
-3. Use `--max-retries 5` for more retry attempts
+2. Try with `--verbose` to see detailed execution logs
+3. Use `--max-actions 150` to allow more actions (default: 100)
+4. Check database state if execution gets stuck
 
 ## Key Features
 
