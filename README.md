@@ -1,4 +1,4 @@
-# Tau-Helper: Warrior Tau-Bench Helper Library
+# Tau-Helper: Tau-Bench Helper Library
 
 A comprehensive toolkit for creating, validating, and managing tasks, tools, and SOPs across all Warrior Tau-Bench domains.
 
