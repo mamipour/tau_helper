@@ -30,12 +30,12 @@ Create `.env` in `tau_helper/` directory:
 ```env
 # Default model (used for instruction evaluation)
 DEFAULT_MODEL=gpt-4o-mini
-DEFAULT_API_KEY=your-api-key
+DEFAULT_API_KEY=your-openai-api-key
 DEFAULT_BASE_URL=https://api.openai.com/v1
 
 # Reasoning model (used for SOP mapping, scaffolding)
-DEFAULT_MODEL_R=gpt-5-mini
-DEFAULT_API_KEY_R=your-api-key
+DEFAULT_MODEL_R=gpt-4o-mini
+DEFAULT_API_KEY_R=your-openai-api-key
 DEFAULT_BASE_URL_R=https://api.openai.com/v1
 
 # Multi-Agent Architecture (OPTIONAL)
@@ -44,12 +44,12 @@ DEFAULT_BASE_URL_R=https://api.openai.com/v1
 # - If they differ, JUDGE picks the best one
 # - Improves quality through model consensus
 
-DEFAULT_MODEL_R2=meta-llama-3.3-70b-instruct
-DEFAULT_API_KEY_R2=your-r2-api-key
-DEFAULT_BASE_URL_R2=https://api.friendli.ai/serverless/v1
+DEFAULT_MODEL_R2=gpt-5-mini
+DEFAULT_API_KEY_R2=your-openai-api-key
+DEFAULT_BASE_URL_R2=https://api.openai.com/v1
 
 DEFAULT_MODEL_R_JUDGE=deepseek-ai/DeepSeek-R1-0528
-DEFAULT_API_KEY_R_JUDGE=your-judge-api-key
+DEFAULT_API_KEY_R_JUDGE=your-friendli-api-key
 DEFAULT_BASE_URL_R_JUDGE=https://api.friendli.ai/serverless/v1
 ```
 
