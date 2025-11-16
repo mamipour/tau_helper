@@ -1,16 +1,21 @@
-# Tau-Helper: Warrior Tau-Bench Helper Library
+# Tau-Helper: Tau2-Bench Helper Library
+
+**Purpose:** Accelerate domain development for [Tau2-Bench](https://github.com/sierra-research/tau2-bench) by creating high-quality, deterministic ground truth tasks.
+
+**Philosophy:** With perfect tools + rules + instructions → there's only ONE path to ground truth.
 
 ## Project Structure
 
 ```
 your-workspace/
-├── warrior-tau-bench/    ← Main project repository
+├── warrior-tau-bench/    ← Main project repository (Tau2-Bench fork)
 │   ├── domains/          ← Domain implementations (sec, airline, etc.)
 │   └── ...
 └── tau_helper/           ← This helper library (SIBLING directory)
     ├── run.py            ← Entry point
     ├── cli.py            ← CLI commands
     ├── .env              ← Configuration (API keys, models)
+    ├── iterative_scaffolder.py  ← Iterative scaffolding engine
     └── ...
 ```
 
@@ -29,11 +34,15 @@ python ../tau_helper/run.py <command>
 
 `.env` file location: `tau_helper/.env` (relative to this directory)
 
-Required variables:
-- `DEFAULT_MODEL` - For instruction evaluation
-- `DEFAULT_MODEL_R` - For SOP mapping and scaffolding
-- `DEFAULT_MODEL_R2` (optional) - For multi-agent scaffolding
-- `DEFAULT_MODEL_R_JUDGE` (optional) - For multi-agent judge
+**Required variables:**
+- `DEFAULT_MODEL=gpt-4o-mini` - For instruction evaluation
+- `DEFAULT_MODEL_R=gpt-4o-mini` - For SOP mapping and scaffolding
+
+**Optional (for multi-agent mode):**
+- `DEFAULT_MODEL_R2=gpt-5-mini` - Second model for validation/consensus
+- `DEFAULT_MODEL_R_JUDGE=deepseek-ai/DeepSeek-R1-0528` - Judge for conflict resolution
+
+**See `.env.example` for full configuration**
 
 ## Quick Commands
 
@@ -50,9 +59,40 @@ python ../tau_helper/run.py execute sec --variation variation_2 --task task_001
 
 1. **Instruction Evaluation** - Score 0-100 for user-facing quality
 2. **SOP Chain Mapper** - Map instructions to SOPs, detect ambiguity
-3. **Task Scaffolder** - Generate complete tasks from instructions
+3. **Task Scaffolder** - Generate complete tasks via iterative execution with REAL values (no placeholders!)
 4. **Action Executor** - Execute and debug domain task actions
 5. **Agent Log Reader** - Analyze agent evaluation results
+
+## How Scaffolding Works
+
+**Iterative Execution Approach:**
+1. Maps instruction → SOP chain
+2. Generates ONE action at a time
+3. Executes action immediately using real tools
+4. Feeds execution result back to agent
+5. Repeats until task is complete
+6. Output: Ready-to-use Python code with real values
+
+**No manual work needed** - just copy-paste the generated code!
+
+## Architecture Overview
+
+**Key Files:**
+- `cli.py` - CLI commands and user interface
+- `iterative_scaffolder.py` - Core scaffolding engine with iterative execution
+- `sop_mapper.py` - Maps instructions to SOP chains, detects ambiguity
+- `action_executor.py` - Domain-agnostic action execution
+- `evaluator.py` - Instruction quality scoring
+- `llm.py` - LLM client management (supports multiple models)
+- `agent_log_reader.py` - Agent evaluation analysis
+
+**Scaffolding Flow:**
+1. User provides instruction → `cli.scaffold()`
+2. Maps to SOP chain → `SOPMapper.map_instruction()`
+3. Iterative generation → `IterativeScaffolder.scaffold()`
+   - For each action: Generate → Validate → Execute → Feed back result
+   - Supports multi-agent mode (R + R2 + Judge) for consensus
+4. Output formatted Python code → `_format_iterative_task_as_python()`
 
 ## Documentation
 
@@ -62,8 +102,18 @@ python ../tau_helper/run.py execute sec --variation variation_2 --task task_001
 
 ## Important Notes
 
-- This library is **domain-agnostic** - works with all warrior-tau-bench domains
+- This library is **domain-agnostic** - works with all Tau2-Bench domains
 - Always ensure you're in `warrior-tau-bench/` root when running commands
 - The tool loads domains from CWD, but loads `.env` from its own directory
 - Multi-agent mode (R2 + Judge) significantly improves scaffold quality
+- Scaffolding uses **iterative execution** - actions are generated one at a time with real execution
+- Generated tasks contain **real values only** - no placeholders to fill manually
+
+## Best Practices
+
+1. **Quality First:** Validate instructions with `evaluate` before scaffolding (aim for 80+ score)
+2. **Check for Ambiguity:** Use `map-sop` to detect unclear instructions before generating tasks
+3. **Use Verbose Mode:** Add `--verbose` to see detailed execution logs during scaffolding
+4. **Multi-Agent Setup:** Configure R2 + Judge models for better quality (see `.env.example`)
+5. **Test Generated Tasks:** Always validate with `alignerr validate` after generating
 
