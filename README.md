@@ -118,31 +118,30 @@ python ../tau_helper/run.py map-sop sec --variation variation_2 --task task_001 
 ### Task Scaffolder
 
 ```bash
-# IMPORTANT: Execution mode is in development - MUST use --no-execute
+# IMPORTANT: Execution mode is in development
 # Generate task with placeholders (no-execute mode)
-python ../tau_helper/run.py scaffold <domain> --variation <variation> --instruction "Your instruction" --no-execute
+python ../tau_helper/run.py scaffold <domain> --variation <variation> --instruction "Your instruction"
 
 # Generate task from existing task (re-scaffold with placeholders)
-python ../tau_helper/run.py scaffold <domain> --variation <variation> --task <task_id> --no-execute
+python ../tau_helper/run.py scaffold <domain> --variation <variation> --task <task_id>
 
 # Specify custom task ID
-python ../tau_helper/run.py scaffold <domain> --variation <variation> --instruction "..." --task-id task_new_001 --no-execute
+python ../tau_helper/run.py scaffold <domain> --variation <variation> --instruction "..." --task-id task_new_001
 
 # Configure max retries (default: 3)
-python ../tau_helper/run.py scaffold <domain> --variation <variation> --instruction "..." --max-retries 5 --no-execute
+python ../tau_helper/run.py scaffold <domain> --variation <variation> --instruction "..." --max-retries 5
 
 # Show detailed progress (or auto-show on error)
-python ../tau_helper/run.py scaffold <domain> --variation <variation> --instruction "..." --verbose --no-execute
+python ../tau_helper/run.py scaffold <domain> --variation <variation> --instruction "..." --verbose
 
 # Examples
-python ../tau_helper/run.py scaffold salesforce_management --variation variation_2 --instruction "Transfer accounts to Chris Sullivan" --no-execute
-python ../tau_helper/run.py scaffold salesforce_management --variation variation_2 --task task_001 --no-execute --verbose
+python ../tau_helper/run.py scaffold salesforce_management --variation variation_2 --instruction "Transfer accounts to Chris Sullivan"
+python ../tau_helper/run.py scaffold salesforce_management --variation variation_2 --task task_001 --verbose
 ```
 
 **Task Scaffolder Features:**
 - Maps instruction to SOP chain (reuses `map-sop` logic)
 - Generates action sequence with placeholders (`{{query_single_user_record_output.Id}}`, `{{account_ids}}`)
-- **NO-EXECUTE mode only**: Outputs task with placeholders for manual resolution
 - **Automatic retry logic**: Retries up to 3 times (configurable) if generation fails
 - Shows progress and identifies missing values
 - Outputs complete task in `tasks.py` format (ready to copy-paste)
