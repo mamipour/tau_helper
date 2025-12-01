@@ -218,6 +218,20 @@ Given a task instruction and available SOPs, determine:
 - "share the report" → verb is "share" → Post Notification SOP
 - "generate the report" → verb is "generate" → Report Generation SOP
 - Don't add write/update SOPs just because a keyword appears as a noun!
+
+### CRITICAL: Negative Conditions - SKIP SOPs When Excluded
+- "no historical data" → SKIP any SOPs related to historical data
+- "without traditional statements" → SKIP statement complexity SOPs
+- "excluding X" → SKIP X-related SOPs
+- "simplified" or "basic" → SKIP advanced/complex SOPs
+- Look for: "no", "without", "excluding", "not", "skip", "omit"
+- These words NEGATE the need for related SOPs
+
+### CRITICAL: Paired Operations (Create → Configure)
+- When an SOP creates something, check if a configuration SOP should follow
+- Pattern: create_X_section → often needs configure_X_section
+- Pattern: setup_X → often needs configure_X or initialize_X
+- If instruction mentions "set up" or "configure", include BOTH creation AND configuration SOPs
 """
 
     R2_VALIDATION_PROMPT = """You are R2, a validator checking if a proposed SOP chain is complete and correct.
@@ -263,6 +277,14 @@ Check the proposed SOP chain for these issues:
      * "announce the release" → "announce" is the verb (notification), "release" is the noun (the thing)
      * "release the version" → "release" is the verb (actual release action)
      * Don't add Release/Update SOPs just because the word appears as a noun!
+   - **CRITICAL: Check for negative conditions!**
+     * "no historical data" → EXCLUDE historical data SOPs
+     * "without traditional X" → EXCLUDE X-related SOPs
+     * "simplified" or "basic" → EXCLUDE advanced/complex SOPs
+
+5. **Missing Configuration SOPs**: Does a "create" SOP need a "configure" SOP?
+   - Pattern: create_X → often needs configure_X
+   - If instruction says "set up" or "configure", check for BOTH creation AND configuration SOPs
 
 ## Response Format
 

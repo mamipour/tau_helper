@@ -65,13 +65,21 @@ class PseudoScaffolder:
 Write Python code that calls the available tools to complete the given instruction.
 The code will be executed with real database feedback.
 
-## Instruction
+## Instruction (PRIMARY - This is what you MUST accomplish)
 
 {instruction}
 
-## SOP Chain to Implement
+## Suggested SOP Chain (ADVISORY - Use as guidance, not gospel)
 
 {sop_chain}
+
+NOTE: The SOP chain above is a SUGGESTION based on pattern matching. 
+**THE INSTRUCTION ALWAYS TAKES PRIORITY over the suggested chain.**
+
+If the instruction contradicts the SOP chain, FOLLOW THE INSTRUCTION:
+- Instruction says "no historical data" but chain includes historical SOPs → SKIP those SOPs
+- Instruction says "simplified" or "basic" → SKIP complex/advanced SOPs
+- Instruction explicitly excludes something → Don't include it regardless of chain
 
 ## Available Tools (as Python functions)
 
@@ -92,25 +100,18 @@ These are REAL examples of what tools return. Use these EXACT structures when ac
 1. **Use ONLY the available tool functions** - don't invent functions
 2. **Store results in variables** - you'll need IDs from earlier calls
 3. **Handle the data flow explicitly** - extract IDs from results before using
-4. **COMPLETE ALL SOPs** - You MUST implement EVERY SOP in the chain. Don't stop early!
-5. **ONLY assigned SOPs** - Do NOT add extra SOPs not in the chain. If the chain is "SOP 4, SOP 6", only implement those 2!
-6. **Follow the SOP chain order** - implement SOPs in sequence
-7. **No imports needed** - tools are already available
-8. **Use clear variable names** - e.g., `result`, `item_id`, `list_result`
-9. **Match the sample return structures EXACTLY** - don't assume different field names
+4. **INSTRUCTION IS KING** - The instruction defines what to do. Use SOP chain as guidance only.
+5. **Skip SOPs that contradict instruction** - If instruction says "no X", don't include X-related SOPs
+6. **No imports needed** - tools are already available
+7. **Use clear variable names** - e.g., `result`, `item_id`, `list_result`
+8. **Match the sample return structures EXACTLY** - don't assume different field names
 
-## CRITICAL: SOP Boundary Check
-
-- Count the SOPs in "SOP Chain to Implement" above
-- Your code should implement EXACTLY that many SOPs
-- Do NOT add "Load Sprint Context" or other prep work unless it's in the chain
-- If the instruction mentions specific IDs (like "PROJ-105"), use them directly - don't load context first
-
-## CRITICAL: Task Completeness Check
+## CRITICAL: Instruction-Driven Completeness Check
 
 Before finishing your code, verify:
-- Have you implemented ALL SOPs listed in "SOP Chain to Implement"? Count them!
-- Have you implemented ONLY those SOPs? No extras!
+- Does your code accomplish what the INSTRUCTION asks for?
+- If instruction says "no X" or "without X", did you SKIP X-related operations?
+- If instruction says "simplified" or "basic", did you skip complex operations?
 - Does your code include a final write/notification step if required?
 - If the instruction mentions "share", "post", "notify" - did you include that call?
 
@@ -184,8 +185,8 @@ The code should complete the entire task from start to finish.
 
 ## Task Context
 
-**Instruction:** {instruction}
-**SOP Chain:** {sop_chain}
+**Instruction (PRIMARY):** {instruction}
+**Suggested SOP Chain (ADVISORY):** {sop_chain}
 
 ## Available Tools
 
@@ -201,23 +202,23 @@ The code should complete the entire task from start to finish.
 {code}
 ```
 
-## IMPORTANT: Focus on Task Correctness ONLY
+## IMPORTANT: Focus on INSTRUCTION COMPLIANCE
 
-You are reviewing whether the code will produce the CORRECT sequence of tool calls.
-You are NOT doing a production code review.
+You are reviewing whether the code will accomplish the INSTRUCTION correctly.
+The SOP chain is just a suggestion - the INSTRUCTION is what matters!
 
 **DO Review:**
 1. **Tool Calls**: Are function names valid? Do parameters match tool schemas?
 2. **Data Flow**: Are IDs from previous calls used correctly in subsequent calls?
-3. **SOP Compliance**: Does the code execute SOPs in the correct order?
-4. **Missing Steps**: Are any REQUIRED SOP steps missing? COUNT the SOPs in the chain vs SOPs in code!
-5. **Hallucinated Values**: Are IDs INVENTED that don't appear in instruction OR tool results?
-6. **Task Completion**: Will the code complete the ENTIRE instruction? Check if all SOPs are implemented!
-7. **Domain Rule Compliance**: Does the code follow formatting rules from Domain Rules (e.g., number formatting, template formats)?
+3. **Instruction Compliance**: Does the code accomplish what the INSTRUCTION asks for?
+4. **Hallucinated Values**: Are IDs INVENTED that don't appear in instruction OR tool results?
+5. **Domain Rule Compliance**: Does the code follow formatting rules from Domain Rules (e.g., number formatting, template formats)?
 
-**CRITICAL - Completeness Check:**
-- Count the SOPs in the SOP Chain: {sop_chain}
-- Does the code implement ALL of them? If code only does 2 out of 5 SOPs, that's a CRITICAL issue!
+**CRITICAL: Instruction Overrides SOP Chain!**
+- If instruction says "no historical data" but SOP chain includes historical SOPs → CORRECT to skip them
+- If instruction says "without X" or "simplified" → CORRECT to skip X-related operations
+- If instruction excludes something, code SHOULD exclude it even if SOP chain suggests it
+- The SOP chain is ADVISORY. The INSTRUCTION is KING.
 
 **CRITICAL: Values from the Instruction are NOT Hallucinated!**
 - If the instruction mentions a specific ID or name, using it in code is CORRECT
@@ -287,8 +288,10 @@ Your job is to WRITE THE FINAL WORKING CODE. This is the last step - whatever yo
 
 ## The Task
 
-**Instruction:** {instruction}
-**SOP Chain:** {sop_chain}
+**Instruction (PRIMARY - accomplish THIS):** {instruction}
+**Suggested SOP Chain (ADVISORY):** {sop_chain}
+
+NOTE: The instruction is PRIMARY. If instruction contradicts SOP chain (e.g., "no X" but chain includes X), follow instruction!
 
 ## Available Tools
 
@@ -320,7 +323,7 @@ Your job is to WRITE THE FINAL WORKING CODE. This is the last step - whatever yo
 
 You must produce code that:
 1. RUNS WITHOUT ERRORS (no undefined variables, no syntax errors)
-2. Completes the FULL instruction
+2. Completes the INSTRUCTION (not necessarily all SOPs if instruction excludes them!)
 3. Follows ALL domain rules (especially formatting rules)
 4. Uses correct tool calls with valid parameters
 
@@ -329,6 +332,10 @@ Fix the issues R2 identified. The main problems are usually:
 - Wrong field names (check sample outputs!)
 - Missing steps (add them!)
 - Format violations (use int() for numbers, correct templates)
+
+**CRITICAL: Instruction Overrides SOP Chain:**
+- If instruction says "no X" or "without X" → DO NOT include X-related code
+- If instruction excludes something, SKIP it even if SOP chain suggests it
 
 **Values from instruction are NOT hallucinated:**
 - IDs/names from instruction → use them directly in code
@@ -455,7 +462,15 @@ OUTPUT: Return ONLY valid Python code. No explanation.
                 doc_lines.append("    Args:")
                 for param_name, param_info in params.items():
                     param_desc = param_info.get('description', '')
-                    doc_lines.append(f"        {param_name}: {param_desc}")
+                    param_enum = param_info.get('enum', [])
+                    if param_enum:
+                        # Include valid enum values so model knows exact options
+                        enum_str = ", ".join(f'"{v}"' for v in param_enum[:5])  # Limit to 5
+                        if len(param_enum) > 5:
+                            enum_str += ", ..."
+                        doc_lines.append(f"        {param_name}: {param_desc} Valid values: [{enum_str}]")
+                    else:
+                        doc_lines.append(f"        {param_name}: {param_desc}")
             doc_lines.append("")
             doc_lines.append("    Returns:")
             doc_lines.append("        dict: Result of the operation")
@@ -534,7 +549,10 @@ OUTPUT: Return ONLY valid Python code. No explanation.
                         if len(result_str) > 600:
                             result_str = result_str[:600] + "\n  ... (truncated)"
                         
-                        samples.append(f"# {action.name}({kwargs_str})\n# Returns:\n{result_str}\n")
+                        # Add explicit access patterns for key ID extractions
+                        access_hints = self._generate_access_hints(action.name, result)
+                        
+                        samples.append(f"# {action.name}({kwargs_str})\n# Returns:\n{result_str}\n{access_hints}")
                         sampled_tools.add(action.name)
                 except Exception as e:
                     # Keep executing to maintain context
@@ -579,6 +597,34 @@ OUTPUT: Return ONLY valid Python code. No explanation.
         result = "\n".join(samples)
         result = result.replace("{", "{{").replace("}", "}}")
         return result
+    
+    def _generate_access_hints(self, tool_name: str, result: any) -> str:
+        """Generate explicit access pattern hints for common ID extractions."""
+        hints = []
+        
+        if not isinstance(result, dict):
+            return ""
+        
+        # Find nested ID fields and generate access patterns
+        def find_ids(obj, path="result"):
+            if isinstance(obj, dict):
+                for key, value in obj.items():
+                    current_path = f'{path}["{key}"]'
+                    # Check for common ID patterns
+                    if isinstance(value, str) and ("_id" in key.lower() or key.lower().endswith("id")):
+                        hints.append(f"# → {key}: {current_path}")
+                    elif isinstance(value, dict):
+                        find_ids(value, current_path)
+                    elif isinstance(value, list) and len(value) > 0 and isinstance(value[0], dict):
+                        # For lists, show how to access first item
+                        if "id" in value[0] or any("_id" in k.lower() for k in value[0].keys()):
+                            hints.append(f"# → First item: {current_path}[0]")
+        
+        find_ids(result)
+        
+        if hints:
+            return "# ACCESS PATTERNS:\n" + "\n".join(hints[:5]) + "\n"  # Limit to 5 hints
+        return ""
     
     def _extract_code(self, response: str) -> str:
         """Extract Python code from LLM response."""
