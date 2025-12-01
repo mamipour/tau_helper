@@ -434,6 +434,9 @@ OUTPUT: Return ONLY valid Python code. No explanation.
             param_parts = []
             for param_name, param_info in params.items():
                 param_type = param_info.get('type', 'Any')
+                # Handle union types (e.g., ["string", "null"])
+                if isinstance(param_type, list):
+                    param_type = next((t for t in param_type if t != 'null'), 'Any')
                 type_map = {'string': 'str', 'integer': 'int', 'boolean': 'bool', 
                            'array': 'list', 'object': 'dict', 'number': 'float'}
                 py_type = type_map.get(param_type, 'Any')
