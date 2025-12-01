@@ -136,15 +136,15 @@ python ../tau_helper/run.py scaffold sec --variation variation_2 --task task_001
 python ../tau_helper/run.py scaffold sec --variation variation_2 \
   --instruction "Extract Apple's last 3 fiscal years of financial statements"
 
-# With verbose output (shows execution details)
+# With verbose output (shows R/R2 review rounds and execution)
 python ../tau_helper/run.py scaffold sec --variation variation_2 --task task_001 --verbose
 ```
 
 **Features:**
-- Maps instruction → SOP chain
-- **Iterative execution**: Generates ONE action at a time, executes immediately
+- **Code-based generation**: Agents write Python code that calls tools
+- **R/R2 Roundtable**: R generates, R2 reviews, up to 5 refinement rounds
+- **Live editing**: Execution failures trigger automatic R2 diagnosis → R fix
 - **Real values only**: No placeholders! Uses actual execution results
-- Adapts based on execution feedback (errors, results)
 - Outputs ready-to-use task code with real values
 
 ### 6. Execute Task Actions (Testing)

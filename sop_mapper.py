@@ -210,6 +210,14 @@ Given a task instruction and available SOPs, determine:
 - Include parameters in SOP names when helpful
 - If instruction doesn't mention something, don't assume it's needed
 - Only mark ambiguous if instruction genuinely unclear (not just "we could also do X")
+
+### CRITICAL: Verb vs Noun Distinction
+- Match SOPs to the ACTION VERB in the instruction, not just keywords!
+- "announce the release" → verb is "announce" → Post Notification SOP (NOT Release SOP)
+- "release the version" → verb is "release" → Release Version SOP
+- "share the report" → verb is "share" → Post Notification SOP
+- "generate the report" → verb is "generate" → Report Generation SOP
+- Don't add write/update SOPs just because a keyword appears as a noun!
 """
 
     R2_VALIDATION_PROMPT = """You are R2, a validator checking if a proposed SOP chain is complete and correct.
@@ -251,6 +259,10 @@ Check the proposed SOP chain for these issues:
 
 4. **Extra/Unnecessary SOPs**: Are there SOPs that don't match the instruction?
    - Only flag if clearly not requested
+   - **CRITICAL: Distinguish verbs from nouns!**
+     * "announce the release" → "announce" is the verb (notification), "release" is the noun (the thing)
+     * "release the version" → "release" is the verb (actual release action)
+     * Don't add Release/Update SOPs just because the word appears as a noun!
 
 ## Response Format
 
@@ -479,6 +491,93 @@ Decision:"""
 
         return content
 
+    def _expand_nested_sop_requirements(self, sop_chain: List[str], verbose: bool = False) -> List[str]:
+        """
+        Scan the rules for nested SOP requirements and expand the chain.
+        
+        If an SOP in the chain has a step that says "Execute SOP X" or "Run SOP X",
+        add SOP X to the chain immediately after the current SOP.
+        
+        Args:
+            sop_chain: List of SOP names in the chain
+            verbose: Print expansion details
+            
+        Returns:
+            Expanded SOP chain with nested requirements included
+        """
+        import re
+        
+        if not self.sops:
+            return sop_chain
+            
+        # Convert rules to searchable text
+        if isinstance(self.sops, list):
+            rules_text = "\n".join(str(rule) for rule in self.sops)
+        elif isinstance(self.sops, dict):
+            rules_text = str(self.sops)
+        else:
+            rules_text = str(self.sops)
+        
+        # Track which SOPs reference other SOPs
+        sop_dependencies = {}
+        
+        # Pattern to find SOP definitions and their nested requirements
+        # Look for patterns like "SOP X: ... Execute SOP Y ..." or "... run SOP Y ..."
+        for sop_name in sop_chain:
+            # Extract the SOP number/name for matching
+            sop_pattern = re.escape(sop_name)
+            
+            # Find the SOP definition section in rules
+            # Look for the SOP and capture text until next SOP or section
+            sop_section_pattern = rf'{sop_pattern}[:\s].*?(?=SOP \d+[:\s]|$)'
+            sop_section_match = re.search(sop_section_pattern, rules_text, re.IGNORECASE | re.DOTALL)
+            
+            if sop_section_match:
+                sop_section = sop_section_match.group()
+                
+                # Find nested SOP requirements in this section
+                # Patterns: "Execute SOP X", "Run SOP X", "call SOP X", "perform SOP X"
+                nested_patterns = [
+                    r'[Ee]xecute\s+(SOP\s+\d+[^,.\n]*)',
+                    r'[Rr]un\s+(SOP\s+\d+[^,.\n]*)',
+                    r'[Cc]all\s+(SOP\s+\d+[^,.\n]*)',
+                    r'[Pp]erform\s+(SOP\s+\d+[^,.\n]*)',
+                ]
+                
+                for pattern in nested_patterns:
+                    matches = re.findall(pattern, sop_section)
+                    for match in matches:
+                        nested_sop = match.strip()
+                        # Clean up the nested SOP name
+                        nested_sop = re.sub(r'\s+', ' ', nested_sop).strip()
+                        
+                        if sop_name not in sop_dependencies:
+                            sop_dependencies[sop_name] = []
+                        if nested_sop not in sop_dependencies[sop_name]:
+                            sop_dependencies[sop_name].append(nested_sop)
+        
+        # Expand the chain with nested requirements
+        expanded_chain = []
+        added_nested = []
+        for sop_name in sop_chain:
+            expanded_chain.append(sop_name)
+            
+            # Add any nested requirements immediately after this SOP
+            if sop_name in sop_dependencies:
+                for nested_sop in sop_dependencies[sop_name]:
+                    # Only add if not already in chain
+                    if nested_sop not in expanded_chain and nested_sop not in sop_chain:
+                        expanded_chain.append(nested_sop)
+                        added_nested.append((sop_name, nested_sop))
+        
+        # Log expansion if any SOPs were added
+        if added_nested and verbose:
+            print(f"📎 Expanded SOP chain with nested requirements:")
+            for parent, nested in added_nested:
+                print(f"   {parent} requires → {nested}")
+        
+        return expanded_chain
+
     def _ask_r2_validator(self, instruction: str, proposed_chain: SOPChain) -> Dict[str, Any]:
         """
         Ask R2 to validate the proposed SOP chain.
@@ -600,10 +699,12 @@ Decision:"""
         cleaned_content = self._clean_llm_response(response.content)
         mapping = self.parser.parse(cleaned_content)
 
-        # If roundtable mode disabled, return immediately
+        # If roundtable mode disabled, expand nested SOPs and return
         if not self.roundtable_enabled:
             if verbose:
                 print(f"⚠️  SOP Mapper: Roundtable mode DISABLED (llm_r2={self.llm_r2 is not None}, llm_judge={self.llm_judge is not None})")
+            # Expand nested SOP requirements before returning
+            mapping.primary_chain.sops = self._expand_nested_sop_requirements(mapping.primary_chain.sops, verbose)
             return mapping
 
         # Step 2: Roundtable validation
@@ -616,6 +717,8 @@ Decision:"""
         if not r2_result.get("has_concerns", False):
             if verbose:
                 print(f"✓ R2 Validator: No concerns identified")
+            # Expand nested SOP requirements before returning
+            mapping.primary_chain.sops = self._expand_nested_sop_requirements(mapping.primary_chain.sops, verbose)
             return mapping
 
         # Step 3: R2 has concerns - ask Model R to decide
@@ -650,6 +753,8 @@ Decision:"""
                 if verbose:
                     print(f"   Revised chain: {', '.join(revised_chain.sops)}")
 
+            # Expand nested SOP requirements before returning
+            mapping.primary_chain.sops = self._expand_nested_sop_requirements(mapping.primary_chain.sops, verbose)
             return mapping
 
         # Step 4: Model R decided PROCEED (disagreed with R2) - consult Judge
@@ -664,6 +769,8 @@ Decision:"""
             # Judge sided with R - proceed with original chain
             if verbose:
                 print(f"  ✓ Judge sided with R - proceeding with original chain")
+            # Expand nested SOP requirements before returning
+            mapping.primary_chain.sops = self._expand_nested_sop_requirements(mapping.primary_chain.sops, verbose)
             return mapping
         else:
             # Judge sided with R2 - force revision
@@ -696,6 +803,8 @@ The Judge has determined these concerns are valid and must be addressed."""
                 if verbose:
                     print(f"    ⚠️ Model R failed to provide valid revision - keeping original chain")
 
+            # Expand nested SOP requirements before returning
+            mapping.primary_chain.sops = self._expand_nested_sop_requirements(mapping.primary_chain.sops, verbose)
             return mapping
     
     def map_task(

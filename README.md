@@ -137,7 +137,7 @@ python ../tau_helper/run.py map-sop sec --variation variation_2 --task task_001 
 ### Task Scaffolder
 
 ```bash
-# Generate task from custom instruction (iterative execution with real values)
+# Generate task from custom instruction
 python ../tau_helper/run.py scaffold <domain> --variation <variation> --instruction "Your instruction"
 
 # Generate task from existing task instruction
@@ -145,9 +145,6 @@ python ../tau_helper/run.py scaffold <domain> --variation <variation> --task <ta
 
 # Specify custom task ID
 python ../tau_helper/run.py scaffold <domain> --variation <variation> --instruction "..." --task-id task_new_001
-
-# Configure max actions limit (default: 100, prevents infinite loops)
-python ../tau_helper/run.py scaffold <domain> --variation <variation> --instruction "..." --max-actions 150
 
 # Show detailed progress including execution results
 python ../tau_helper/run.py scaffold <domain> --variation <variation> --instruction "..." --verbose
@@ -158,37 +155,27 @@ python ../tau_helper/run.py scaffold salesforce_management --variation variation
 ```
 
 **Task Scaffolder Features:**
-- **Iterative execution**: Generates ONE action at a time, executes it immediately, feeds result to agent
+- **Code-based generation**: Agents write Python code that calls tools
+- **R/R2 Roundtable**: R generates code, R2 reviews for correctness, up to 5 refinement rounds
+- **Live editing**: Execution failures trigger automatic diagnosis (R2) and fixes (R)
 - **Real values only**: No placeholders! Uses actual values from execution results
-- Maps instruction to SOP chain (reuses `map-sop` logic)
-- Resets database before execution for clean state
-- Adapts based on execution feedback (errors, results)
+- **Domain-agnostic**: Works with any domain automatically
 - Outputs complete task in `tasks.py` format with real, executable values
-- **Model transparency**: Shows which model(s) generated the output:
-  - `Single Model` - Default single model mode
-  - `Consensus (R + R2)` - Both models agreed
-  - `Judge → Model R` or `Judge → Model R2` - Judge resolved disagreement
 
-**🤖 Advanced Feature: Multi-Agent Architecture**
+**🤖 Multi-Agent Architecture**
 
-When `DEFAULT_MODEL_R2` and `DEFAULT_MODEL_R_JUDGE` are configured in `.env`, scaffolding automatically uses **multi-agent mode** for improved quality:
+Configure `DEFAULT_MODEL_R2` and optionally `DEFAULT_MODEL_R_JUDGE` in `.env`:
 
 **How it works:**
-1. **Parallel Generation**: Both R and R2 models generate scaffolds independently
-2. **Consensus Check**: If both models produce the same scaffold → use it (high confidence)
-3. **Judge Resolution**: If they differ → JUDGE model evaluates both and picks the best one
-4. **Fault Tolerance**: If R2 fails → automatically fall back to R model
-
-**Benefits:**
-- **Higher quality**: Multiple perspectives catch edge cases
-- **Reduced errors**: Model consensus validates correctness
-- **Automatic fallback**: System degrades gracefully if one model fails
+1. **Model R** generates Python code for the task
+2. **Model R2** reviews for correctness (tool calls, data flow, SOP compliance)
+3. Up to 5 rounds of refinement until R2 approves
+4. **Judge** (optional) mediates if R2 has critical concerns after all rounds
+5. **Live editing** on execution: failures trigger R2 diagnosis → R fix → re-execute
 
 **Recommended Models:**
-- **R2**: OpenAI models like `gpt-5-mini`, `gpt-4o`, or stronger reasoning models
-- **Judge**: `deepseek-ai/DeepSeek-R1-0528` or other reasoning models (good for evaluation)
-
-**Note**: All models must support structured JSON output.
+- **R/R2**: OpenAI models like `gpt-4o`, `gpt-5-mini`
+- **Judge**: Reasoning models like `deepseek-ai/DeepSeek-R1-0528`
 
 ### Action Executor
 

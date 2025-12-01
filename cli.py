@@ -717,7 +717,7 @@ def info():
     console.print(Panel(info_text, box=box.ROUNDED, border_style="cyan"))
 
 
-@cli.command()
+@cli.command(hidden=True)  # Deprecated: use 'scaffold' instead
 @click.argument("domain")
 @click.option("--variation", required=True, help="Variation name (e.g., variation_2)")
 @click.option("--instruction", help="Task instruction (if not using --task)")
@@ -726,30 +726,11 @@ def info():
 @click.option("--model", help="Override LLM model for scaffolding")
 @click.option("--max-actions", default=100, type=int, help="Maximum actions to prevent infinite loops (default: 100)")
 @click.option("--verbose", is_flag=True, help="Show detailed progress logs including execution results")
-def scaffold(domain, variation, instruction, task, task_id, model, max_actions, verbose):
+def scaffold_legacy(domain, variation, instruction, task, task_id, model, max_actions, verbose):
     """
-    Generate a complete task scaffold from an instruction using iterative execution.
-
-    This approach generates ONE action at a time, executes it immediately,
-    and feeds the result back to the agent for the next action. This eliminates
-    placeholders and allows the agent to adapt based on actual execution results.
-
-    Supports multi-agent mode (Model R + R2 + Judge) when configured in .env.
-
-    Examples:
-
-        # Scaffold from instruction
-        python tau_helper/run.py scaffold salesforce_performance_management \\
-          --variation variation_2 \\
-          --instruction "Transfer BlueCurve Analytics from Ava Lopez to Chris Sullivan"
-
-        # Scaffold from existing task instruction
-        python tau_helper/run.py scaffold salesforce_performance_management \\
-          --variation variation_2 --task task_001
-
-        # With verbose output to see execution results
-        python tau_helper/run.py scaffold sec \\
-          --variation variation_2 --task task_001 --verbose
+    [DEPRECATED] Legacy iterative scaffolder. Use 'scaffold' command instead.
+    
+    This command is hidden and kept for backwards compatibility only.
     """
     from .llm import get_llm_client, is_multi_agent_enabled, get_reasoning_llm_r2, get_judge_llm
     from .iterative_scaffolder import IterativeScaffolder
@@ -915,6 +896,133 @@ def _format_iterative_task_as_python(task_id: str, instruction: str, actions: Li
     lines.append('),')
 
     return "\n".join(lines)
+
+
+@cli.command()
+@click.argument("domain")
+@click.option("--variation", required=True, help="Variation name (e.g., variation_2)")
+@click.option("--instruction", help="Task instruction (if not using --task)")
+@click.option("--task", help="Task ID to get instruction from (e.g., task_001)")
+@click.option("--task-id", default="task_new", help="Task ID for generated task (default: task_new)")
+@click.option("--model", help="Override LLM model for scaffolding")
+@click.option("--max-rounds", default=5, type=int, help="Maximum R/R2 review rounds (default: 5)")
+@click.option("--verbose", is_flag=True, help="Show detailed progress logs")
+def scaffold(domain, variation, instruction, task, task_id, model, max_rounds, verbose):
+    """
+    Generate a complete task scaffold using code-based execution with R/R2 roundtable.
+    
+    This approach has agents write Python code that calls tools. The code is reviewed
+    in a roundtable (R generates, R2 reviews, Judge mediates), then executed with 
+    real database feedback. Failed executions trigger automatic diagnosis and fixes.
+    
+    Features:
+    - Code-based generation - forces explicit data flow
+    - R2 reviews the full plan structure at once
+    - Variables prevent ID hallucination (must be assigned from results)
+    - Up to 5 rounds of refinement before execution
+    - Live editing on execution failures (R2 diagnoses, R fixes)
+    
+    Examples:
+    
+        # Scaffold from instruction
+        python tau_helper/run.py scaffold salesforce_performance_management \\
+          --variation variation_2 \\
+          --instruction "Transfer BlueCurve Analytics from Ava Lopez to Chris Sullivan"
+        
+        # Scaffold from existing task instruction  
+        python tau_helper/run.py scaffold slack_jira_agile_automation \\
+          --variation variation_2 --task task_010 --verbose
+    """
+    from .llm import get_llm_client, get_reasoning_llm_r2, get_judge_llm
+    from .pseudo_scaffolder import PseudoScaffolder
+    
+    console.print(f"[bold]Domain:[/bold] {domain}, [bold]Variation:[/bold] {variation}")
+    console.print(f"[bold magenta]🧪 PSEUDO SCAFFOLDER[/bold magenta] - Code-based task generation with R/R2 roundtable\n")
+    
+    # Get instruction
+    if task and not instruction:
+        # Load instruction from task
+        try:
+            from .action_executor import ActionExecutor
+            executor = ActionExecutor(domain, variation)
+            tasks = executor.get_available_tasks()
+            if task not in tasks:
+                console.print(f"[red]Error:[/red] Task '{task}' not found")
+                return
+            instruction = tasks[task].instruction
+            console.print(f"[dim]Loaded instruction from {task}[/dim]\n")
+        except Exception as e:
+            console.print(f"[red]Error loading task:[/red] {e}")
+            return
+    
+    if not instruction:
+        console.print("[red]Error:[/red] Must provide --instruction or --task")
+        return
+    
+    # Initialize LLMs
+    try:
+        if model:
+            llm = get_llm_client(model=model)
+        else:
+            llm = get_llm_client(temperature=0.0, seed=42)
+        
+        # R2 is required for pseudo scaffolder
+        llm_r2 = get_reasoning_llm_r2()
+        if not llm_r2:
+            console.print("[yellow]Warning:[/yellow] R2 model not configured. Using same model for R2.")
+            llm_r2 = llm
+        
+        # Judge is optional but recommended
+        llm_judge = get_judge_llm()
+        if llm_judge:
+            console.print("[dim]Judge available for mediation if R/R2 disagree[/dim]\n")
+        else:
+            console.print("[dim]No Judge configured - R2's final decision will be used[/dim]\n")
+            
+    except Exception as e:
+        console.print(f"[red]Error initializing LLM:[/red] {e}")
+        return
+    
+    # Initialize pseudo scaffolder
+    try:
+        scaffolder = PseudoScaffolder(
+            domain=domain,
+            variation=variation,
+            llm=llm,
+            llm_r2=llm_r2,
+            llm_judge=llm_judge,
+            max_review_rounds=max_rounds
+        )
+    except Exception as e:
+        console.print(f"[red]Error initializing pseudo scaffolder:[/red] {e}")
+        import traceback
+        traceback.print_exc()
+        return
+    
+    # Generate scaffold
+    actions, error, progress = scaffolder.scaffold(
+        instruction=instruction,
+        task_id=task_id,
+        verbose=verbose
+    )
+    
+    # Show progress
+    if verbose:
+        for msg in progress:
+            console.print(msg)
+    
+    # Show result or error
+    if error:
+        console.print(f"\n[bold red]Pseudo Scaffolding Failed[/bold red]")
+        console.print(f"[red]{error}[/red]")
+        return
+    
+    if not actions:
+        console.print(f"\n[bold yellow]No actions generated[/bold yellow]")
+        return
+    
+    console.print(f"\n[bold green]✅ Pseudo scaffolding complete![/bold green]")
+    console.print(f"[bold green]Generated {len(actions)} actions from Python code execution[/bold green]")
 
 
 if __name__ == "__main__":

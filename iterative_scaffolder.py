@@ -11,6 +11,7 @@ Supports multi-agent mode with judge for consensus.
 """
 
 import json
+import re
 import sys
 from typing import Dict, List, Any, Optional, Tuple
 from pydantic import BaseModel, Field
@@ -20,6 +21,54 @@ from langchain.prompts import ChatPromptTemplate
 
 from tau_helper.sop_mapper import SOPMapper
 from tau_helper.action_executor import ActionExecutor
+
+
+def strip_json_comments(json_str: str) -> str:
+    """
+    Strip comments from JSON string (domain-agnostic utility).
+
+    Handles:
+    - Single-line comments: // comment
+    - Multi-line comments: /* comment */
+    - Trailing commas before closing braces
+
+    Args:
+        json_str: JSON string potentially containing comments
+
+    Returns:
+        Clean JSON string without comments
+    """
+    # Remove single-line comments (// ...)
+    json_str = re.sub(r'//.*$', '', json_str, flags=re.MULTILINE)
+    # Remove multi-line comments (/* ... */)
+    json_str = re.sub(r'/\*.*?\*/', '', json_str, flags=re.DOTALL)
+    # Remove trailing commas before closing braces/brackets
+    json_str = re.sub(r',(\s*[}\]])', r'\1', json_str)
+    return json_str
+
+
+def extract_and_clean_json(content: str) -> str:
+    """
+    Extract JSON from markdown code blocks and clean it (domain-agnostic).
+
+    Args:
+        content: Raw LLM response content
+
+    Returns:
+        Clean JSON string ready for parsing
+    """
+    content = content.strip()
+
+    # Extract from markdown code blocks if present
+    if "```json" in content:
+        content = content.split("```json")[1].split("```")[0].strip()
+    elif "```" in content:
+        content = content.split("```")[1].split("```")[0].strip()
+
+    # Strip comments
+    content = strip_json_comments(content)
+
+    return content
 
 
 class NextAction(BaseModel):
@@ -116,7 +165,12 @@ Based on the execution history and SOP chain, determine the NEXT action to execu
    - Execute ALL steps of an SOP in the exact order shown
    - Do NOT skip intermediate steps (e.g., can't do step 3 without doing step 2 first)
    - Complete ALL steps of SOP N before starting SOP N+1
-6. Process ALL entities mentioned in the instruction (if instruction mentions multiple people/accounts, process ALL of them)
+6. **Scope queries using context from instruction** (Domain-Agnostic Scoping):
+   - If instruction mentions specific entities (e.g., "Globex's review", "SC-1002", "John's portfolio"), use filters to target ONLY those entities
+   - WRONG: Query all contracts when instruction says "Globex's review" → Use customer_ids or contract filters for Globex
+   - RIGHT: Extract entity identifiers from instruction → Pass them as filters in your queries
+   - **Avoid infinite inspection loops**: If you've inspected 3+ similar entities (e.g., 3 billing plans, 3 customers) and the SOP doesn't require exhaustive iteration, move to the next SOP
+   - Process multiple entities ONLY when instruction explicitly lists them (e.g., "Globex AND Initech", "all customers", "entire portfolio")
 7. Match tool parameter types exactly: dict for "object", list for "array", string for "string" - check tool schemas!
 8. When all SOPs are implemented AND all entities processed AND task is complete, set done=True
 
@@ -175,9 +229,9 @@ If answers are YES, YES, NO → Set done=True IMMEDIATELY. Do NOT continue.
 Instruction: {instruction}
 SOP Chain: {sop_chain}
 
-## SOP Definitions (Detailed Breakdown)
+## Domain Rules & SOP Definitions
 
-{sop_definitions}
+{rules}
 
 ## Available Tools
 
@@ -203,6 +257,14 @@ Evaluate which action is better for continuing this task. Consider:
 3. Completeness - Does it properly implement the next SOP step?
 4. Logic - Does it make sense given the current state?
 5. Tool validity - Is the proposed tool name valid (check tools_description)?
+
+**CRITICAL: Instruction Overrides SOP Defaults**
+- If the instruction explicitly specifies a value, that OVERRIDES any SOP default
+- SOP defaults only apply when the instruction does NOT specify a value
+
+**CRITICAL: Inapplicable SOPs Can Be Skipped**
+- An SOP may be inapplicable if its prerequisites cannot be satisfied (e.g., a read returned empty results)
+- Skipping an inapplicable SOP to proceed to the next one is VALID
 
 Return:
 - "A" if Action A is better
@@ -291,13 +353,9 @@ Validation: ✗ Invalid - "Previous fetch_other_data (Action 7) was not followed
 Instruction: {instruction}
 SOP Chain: {sop_chain}
 
-## SOP Definitions (Detailed Breakdown)
+## Domain Rules & SOP Definitions
 
-{sop_definitions}
-
-## Domain Rules
-
-{rules_description}
+{rules}
 
 ## Available Tools
 
@@ -327,6 +385,11 @@ Check this proposed action for the following issues:
    - Check if the action violates any domain rules listed above
    - Ensure parameters follow the rules
    - Pay special attention to PREREQUISITES and SOP EXECUTION DISCIPLINE rules
+   - **CRITICAL: Instruction Overrides SOP Defaults**
+     - If the instruction EXPLICITLY specifies a value (e.g., "create a Story", "set priority to High"), that value OVERRIDES any SOP default
+     - SOP defaults only apply when the instruction does NOT specify a value
+     - Do NOT flag "SOP says X but you used Y" if the instruction explicitly said to use Y
+     - Always check the original instruction first before flagging SOP mismatches
 
 3. **SOP Chain Adherence** (CRITICAL):
    - **First, check if the proposed action's SOP is even IN the SOP chain**
@@ -341,7 +404,14 @@ Check this proposed action for the following issues:
      - Check if we're following the chain sequentially (SOP 1 → SOP 2 → SOP 3 → ...)
      - If SOP N has not been completed yet, the proposed action should be from SOP N, not SOP N+1 or later
      - Example: If chain is [A, B, C] and history shows [A step 1, A step 2, A step 3], next action should be from SOP B
-     - Flag if the action appears to skip ahead in the SOP chain before completing earlier SOPs
+     - **EXCEPTION - Backfilling Skipped SOPs** (Domain-Agnostic Recovery Pattern):
+       - If Model R proposes an earlier SOP (e.g., SOP 4) AFTER a later SOP was already executed (e.g., SOP 5 in history), this is called "backfilling"
+       - Check if the proposed earlier SOP was EVER started in execution history
+       - If NO (it was completely skipped): ALLOW it with a WARNING rather than rejecting
+         - Warning message: "SOP ordering recovery: Allowing backfill of skipped SOP [name]. Note: SOP [later_sop] already executed. Consider re-running dependent SOPs after completing this one."
+         - This allows Model R to recover from accidental SOP skips instead of getting stuck
+       - If YES (it was started but incomplete): Apply normal SOP step completeness rules (see rule #4)
+     - Flag if the action appears to skip ahead in the SOP chain before completing earlier SOPs (and it's not a backfill scenario)
 
 4. **SOP Step Completeness** (for multi-step SOPs):
    - Consult the Domain Rules section above to find the detailed SOP definition with numbered steps
@@ -359,12 +429,25 @@ Check this proposed action for the following issues:
 
 6. **Missing Prerequisites**:
    - If action uses a value (like a user ID), check that a previous action retrieved that value
-   - Example: Can't use an entity's ID if we never looked up that entity
    - Check the PREREQUISITES section in Domain Rules for specific prerequisite requirements
 
-7. **Repetitive/Duplicate Actions & Task Completion**:
+7. **Inapplicable SOPs** (CRITICAL - Allow Skipping):
+   - An SOP in the chain may become INAPPLICABLE if its prerequisites cannot be satisfied
+   - Check execution history: Did a previous read action return empty/no results for what this SOP needs?
+   - If the SOP's required input does not exist (e.g., a read returned empty list, no matching entity found), the SOP is inapplicable
+   - **DO NOT block** Model R from skipping an inapplicable SOP to proceed to the next one
+   - When an SOP is inapplicable, allow Model R to proceed to the next SOP in the chain
+   - Only flag as a concern if Model R skips an SOP that IS applicable (prerequisites ARE satisfied)
+
+8. **Repetitive/Duplicate Actions, Infinite Loops & Task Completion**:
    - Check if the proposed action is repetitive (same action name + similar parameters as a recent action in execution history)
    - If the action is a duplicate, flag it in the issues list (e.g., "Duplicate action: store_data was already executed in Action 10")
+   - **Infinite Inspection Loop Detection** (Domain-Agnostic):
+     - Count how many times the SAME inspection action (e.g., query_billing_plan_items, query_customers, fetch_accounts) has been executed in execution history
+     - If the same inspection action has been executed 4+ times with different entity IDs (e.g., BP-1001, BP-1002, BP-1003, BP-1004...) within the SAME SOP, this is likely an infinite loop
+     - Check the instruction for scoping hints: Does it mention specific entities? (e.g., "Globex's review" → should filter to Globex, not all customers)
+     - If loop detected: Flag as issue with message "Potential infinite inspection loop: [action_name] executed N times within SOP [name]. Instruction context suggests scoping to [entity]. Consider moving to next SOP after sufficient sampling."
+     - Suggest: "Missing scoping: Use filters from instruction (e.g., customer_ids for [entity]) to narrow query scope, OR move to next SOP if sufficient entities have been inspected"
    - **Task Completion Assessment**: If you detect duplicates AND observe that all SOPs in the SOP chain have been completed, you may set task_appears_complete=true
      - Check if all SOPs from the SOP chain have been executed (all their steps completed in execution history)
      - If yes, and current action is a duplicate/redundant, set task_appears_complete=true with reasoning explaining which SOPs were completed
@@ -521,10 +604,9 @@ Respond with a JSON object:
         # R2 validation mode: R2 validates R's actions (optionally with judge for roundtable)
         self.validation_enabled = llm_r2 is not None and not self.multi_agent_enabled
 
-        # Load tools, rules, and SOPs for prompting
+        # Load tools and rules for prompting
         self._load_tools()
         self._load_rules()
-        self._load_sop_definitions()
 
     def _load_tools(self):
         """Load tool descriptions with detailed schemas for prompting."""
@@ -572,18 +654,6 @@ Respond with a JSON object:
         except Exception:
             self.rules = []
             self.rules_description = "(No rules defined)"
-
-    def _load_sop_definitions(self):
-        """
-        Load SOP definitions from rules.
-
-        Instead of trying to parse SOPs separately, we pass all rules as the master prompt.
-        The model will find and follow the SOPs defined within the rules naturally.
-        This avoids fragile parsing logic that fails when rules format changes.
-        """
-        # Just use the rules description as-is - no parsing needed!
-        # The model is smart enough to find and follow SOPs within the rules
-        self.sop_definitions = self.rules_description if self.rules_description else "(No rules or SOPs defined)"
 
     def _log(self, message: str, progress_list: list, verbose: bool = False):
         """
@@ -639,8 +709,7 @@ Respond with a JSON object:
         messages = prompt.format_messages(
             instruction=instruction,
             sop_chain=sop_chain_str,
-            sop_definitions=self.sop_definitions,
-            rules_description=self.rules_description,
+            rules=self.rules_description,
             tools_description=self.tools_description,
             execution_history=history_str,
             action_name=next_action.action_name,
@@ -651,14 +720,10 @@ Respond with a JSON object:
 
         response = self.llm_r2.invoke(messages)
 
-        # Parse JSON response
+        # Parse JSON response with improved cleaning
         try:
-            # Extract JSON from response (handle markdown code blocks)
-            content = response.content.strip()
-            if "```json" in content:
-                content = content.split("```json")[1].split("```")[0].strip()
-            elif "```" in content:
-                content = content.split("```")[1].split("```")[0].strip()
+            # Extract and clean JSON (domain-agnostic)
+            content = extract_and_clean_json(response.content)
 
             validation_result = json.loads(content)
             is_valid = validation_result.get("valid", True)
@@ -872,7 +937,7 @@ Respond with a JSON object:
             instruction: str,
             sop_chain: List[str],
             execution_history: List[Dict[str, Any]]
-    ) -> Tuple[str, Optional[NextAction]]:
+    ) -> Tuple[str, Optional[NextAction], Optional[str]]:
         """
         Ask Model R to decide whether to REVISE or PROCEED after R2's feedback.
 
@@ -884,9 +949,10 @@ Respond with a JSON object:
             execution_history: What's been done so far
 
         Returns:
-            Tuple of (decision, revised_action)
+            Tuple of (decision, revised_action, counter_argument)
             decision: "REVISE" or "PROCEED"
             revised_action: NextAction if REVISE, None if PROCEED
+            counter_argument: R's reasoning for PROCEED (why R2's concerns don't apply)
         """
         # Format SOP chain
         sop_chain_text = "\n".join([f"{i+1}. {sop}" for i, sop in enumerate(sop_chain)])
@@ -942,14 +1008,10 @@ Respond with a JSON object:
 
         response = self.llm.invoke(messages)
 
-        # Parse JSON response
+        # Parse JSON response with improved cleaning
         try:
-            # Extract JSON from response (handle markdown code blocks)
-            content = response.content.strip()
-            if "```json" in content:
-                content = content.split("```json")[1].split("```")[0].strip()
-            elif "```" in content:
-                content = content.split("```")[1].split("```")[0].strip()
+            # Extract and clean JSON (domain-agnostic)
+            content = extract_and_clean_json(response.content)
 
             decision_result = json.loads(content)
             decision = decision_result.get("decision", "PROCEED")
@@ -971,15 +1033,15 @@ Respond with a JSON object:
                             sop_step=None,
                             reasoning=revised.get("reasoning", "Task complete - all SOPs executed")
                         )
-                        return "REVISE", revised_action
+                        return "REVISE", revised_action, None
                     else:
                         # Invalid - Model R trying to give up on real work
                         # Reject and treat as incomplete revision
-                        return "PROCEED", None
+                        return "PROCEED", None, "Model R tried to mark done prematurely."
 
                 # Reject invalid revisions - Model R must provide a concrete action (unless done=True for completion)
                 if not revised.get("action_name") or not revised.get("action_kwargs"):
-                    return "PROCEED", None
+                    return "PROCEED", None, "Revised action was incomplete."
 
                 # Only inherit sop_step if action_name didn't change
                 # If action changed, old sop_step is likely wrong
@@ -998,13 +1060,15 @@ Respond with a JSON object:
                     sop_step=revised_sop_step,
                     reasoning=revised.get("reasoning", decision_result.get("reasoning", ""))
                 )
-                return "REVISE", revised_action
+                return "REVISE", revised_action, None
             else:
-                return "PROCEED", None
+                # Return R's counter-argument reasoning when PROCEED
+                counter_argument = decision_result.get("reasoning", "R believes the action is correct despite R2's concerns.")
+                return "PROCEED", None, counter_argument
 
         except Exception as e:
             # If parsing fails, default to PROCEED (trust Model R's original decision)
-            return "PROCEED", None
+            return "PROCEED", None, "Parsing failed - proceeding with original action."
 
     def scaffold(
             self,
@@ -1171,7 +1235,7 @@ Respond with a JSON object:
                             last_r2_concerns = feedback_text
 
                             # Ask Model R for decision
-                            decision, revised_action = self._ask_model_r_decision(
+                            decision, revised_action, r_counter_argument = self._ask_model_r_decision(
                                 next_action, feedback_text, instruction, sop_chain, execution_history
                             )
 
@@ -1218,6 +1282,7 @@ Respond with a JSON object:
                                 # If judge is available, consult for roundtable decision
                                 if self.llm_judge is not None:
                                     self._log(f"🏛️ Consulting Judge to resolve disagreement...", progress, verbose)
+                                    self._log(f"  R's counter-argument: {r_counter_argument}", progress, verbose)
 
                                     # Judge decides: should R proceed or should R2's concerns be heeded?
                                     judge_decision = self._judge_r_vs_r2_feedback(
@@ -1226,7 +1291,7 @@ Respond with a JSON object:
                                         execution_history,
                                         next_action,  # R's proposed action
                                         feedback_text,  # R2's concerns
-                                        next_action.reasoning  # R's reasoning for PROCEED
+                                        r_counter_argument  # R's counter-argument to R2's concerns
                                     )
 
                                     if judge_decision == "R2":
@@ -1243,7 +1308,7 @@ You MUST revise your proposed action to address these validated concerns:
 
 Please provide a revised action that properly addresses these issues."""
 
-                                        _, forced_revision = self._ask_model_r_decision(
+                                        _, forced_revision, _ = self._ask_model_r_decision(
                                             next_action, revised_prompt, instruction, sop_chain, execution_history
                                         )
                                         if forced_revision:
@@ -1376,10 +1441,85 @@ Please provide a revised action that properly addresses these issues."""
                     continue
 
                 # Validate action (allow empty if done=True)
-                if not next_action.done and (not next_action.action_name or not next_action.action_kwargs):
-                    error = "Agent generated invalid action (missing name or kwargs)"
-                    self._log(f"❌ {error}", progress, verbose)
-                    return None, error, progress, model_info
+                if not next_action.done and (not next_action.action_name or next_action.action_kwargs is None):
+                    # FIX 2: Retry with simpler prompt before giving up
+                    self._log(f"⚠️ Invalid action detected, retrying with simplified prompt...", progress, verbose)
+                    
+                    # Determine what the next SOP step should be based on execution history
+                    completed_sops_from_history = set()
+                    for h in execution_history:
+                        if 'error' not in h and h.get('sop_step'):
+                            # Extract SOP number from step description
+                            import re
+                            match = re.search(r'SOP\s*#?(\d+)', h.get('sop_step', ''), re.IGNORECASE)
+                            if match:
+                                completed_sops_from_history.add(int(match.group(1)))
+                    
+                    # Find the next SOP in chain that needs work
+                    next_sop_idx = len(completed_sops_from_history)
+                    if next_sop_idx < len(sop_chain):
+                        next_sop = sop_chain[next_sop_idx]
+                    else:
+                        next_sop = sop_chain[-1] if sop_chain else "unknown"
+                    
+                    # Note: Domain-specific tool inference removed for domain-agnostic scaffolding
+                    # The scaffolder now relies on proper LLM responses rather than hardcoded fallbacks
+                    likely_tool = None
+                    
+                    if likely_tool:
+                        self._log(f"  → Inferred likely tool: {likely_tool}", progress, verbose)
+                        
+                        # Create a simplified retry prompt
+                        retry_prompt = f"""Your previous response could not be parsed. 
+
+Based on the SOP chain, the next action should be: {likely_tool}
+
+Return ONLY valid JSON in this exact format:
+{{
+  "done": false,
+  "action_name": "{likely_tool}",
+  "action_kwargs": {json.dumps(likely_kwargs)},
+  "reasoning": "Executing {next_sop}",
+  "sop_step": "{next_sop}"
+}}
+
+Do not include any other text, markdown, or explanation."""
+
+                        retry_messages = [{"role": "user", "content": retry_prompt}]
+                        
+                        try:
+                            retry_response = self.llm.invoke(retry_messages)
+                            retry_content = extract_and_clean_json(retry_response.content)
+                            retry_data = json.loads(retry_content)
+                            
+                            next_action = NextAction(
+                                done=retry_data.get("done", False),
+                                action_name=retry_data.get("action_name", likely_tool),
+                                action_kwargs=retry_data.get("action_kwargs", likely_kwargs),
+                                reasoning=retry_data.get("reasoning", f"Retry: Executing {next_sop}"),
+                                sop_step=retry_data.get("sop_step", next_sop)
+                            )
+                            self._log(f"  ✓ Retry successful: {next_action.action_name}", progress, verbose)
+                        except Exception as retry_error:
+                            self._log(f"  ⚠️ Retry parsing also failed: {str(retry_error)[:100]}", progress, verbose)
+                            # Last resort: use the inferred tool directly
+                            if likely_tool and likely_kwargs is not None:
+                                next_action = NextAction(
+                                    done=False,
+                                    action_name=likely_tool,
+                                    action_kwargs=likely_kwargs,
+                                    reasoning=f"Fallback: Inferred from SOP chain - {next_sop}",
+                                    sop_step=next_sop
+                                )
+                                self._log(f"  ✓ Using fallback action: {next_action.action_name}", progress, verbose)
+                            else:
+                                error = "Agent generated invalid action (missing name or kwargs) and retry failed"
+                                self._log(f"❌ {error}", progress, verbose)
+                                return None, error, progress, model_info
+                    else:
+                        error = "Agent generated invalid action (missing name or kwargs)"
+                        self._log(f"❌ {error}", progress, verbose)
+                        return None, error, progress, model_info
 
                 # Pre-execution validation: Check if action_name is actually a tool name (skip if done=True)
                 available_tool_names = [t.get_info()['function']['name'] for t in self.tools]
@@ -1550,8 +1690,8 @@ Please provide a revised action that properly addresses these issues."""
                             # Try to find tools relevant to current SOP
                             relevant_tools = []
                             if next_action.sop_step:
-                                # Search SOP definitions for this SOP
-                                for line in self.sop_definitions.split('\n'):
+                                # Search rules for this SOP
+                                for line in self.rules_description.split('\n'):
                                     if next_action.sop_step in line and 'Tools:' in line:
                                         # Extract tool names after "Tools:"
                                         tools_part = line.split('Tools:')[1].strip()
@@ -1601,10 +1741,10 @@ Please provide a revised action that properly addresses these issues."""
                             if next_action.sop_step:
                                 enhanced_error += f"Current SOP: {next_action.sop_step}\n\n"
 
-                                # Try to find SOP definition
+                                # Try to find SOP definition in rules
                                 sop_lines = []
                                 in_sop = False
-                                for line in self.sop_definitions.split('\n'):
+                                for line in self.rules_description.split('\n'):
                                     if next_action.sop_step in line:
                                         in_sop = True
                                     if in_sop:
@@ -1795,7 +1935,57 @@ Please provide a revised action that properly addresses these issues."""
         )
 
         response = self.llm.invoke(messages)
-        next_action = parser.parse(response.content)
+
+        # Parse with retry and error handling (domain-agnostic)
+        max_retries = 3
+        last_error = None
+
+        for attempt in range(max_retries):
+            try:
+                # Clean the response content
+                cleaned_content = extract_and_clean_json(response.content)
+
+                # Try parsing with Pydantic
+                next_action = parser.parse(cleaned_content)
+                break  # Success!
+
+            except Exception as e:
+                last_error = e
+
+                if attempt < max_retries - 1:
+                    # Retry with more aggressive cleaning
+                    print(f"⚠️  Parsing attempt {attempt + 1} failed: {str(e)[:100]}")
+                    print(f"🔄 Retrying with additional cleaning...")
+
+                    try:
+                        # Fallback: try parsing as plain JSON dict then convert to NextAction
+                        cleaned_json = extract_and_clean_json(response.content)
+                        data = json.loads(cleaned_json)
+
+                        # Construct NextAction from dict
+                        next_action = NextAction(
+                            done=data.get("done", False),
+                            action_name=data.get("action_name"),
+                            action_kwargs=data.get("action_kwargs", {}),
+                            reasoning=data.get("reasoning", ""),
+                            sop_step=data.get("sop_step")
+                        )
+                        break  # Success!
+
+                    except Exception as e2:
+                        last_error = e2
+                        if attempt == max_retries - 1:
+                            # Final attempt failed
+                            print(f"❌ All parsing attempts failed")
+                            print(f"   Last error: {str(e2)}")
+                            print(f"   Raw content preview: {response.content[:200]}...")
+                            raise Exception(f"Failed to parse action after {max_retries} attempts: {str(e2)}\nContent: {response.content}")
+                else:
+                    # Final attempt - show detailed error
+                    print(f"❌ Parsing failed after {max_retries} attempts")
+                    print(f"   Error: {str(last_error)}")
+                    print(f"   Raw content: {response.content}")
+                    raise Exception(f"Failed to parse action: {str(last_error)}\nContent: {response.content}")
 
         # Note: Repetition detection is now handled through roundtable discussion
         # (R2 validation → Model R decision → Judge mediation if needed)
@@ -1922,7 +2112,7 @@ Please provide a revised action that properly addresses these issues."""
         messages = prompt.format_messages(
             instruction=instruction,
             sop_chain=sop_chain_str,
-            sop_definitions=self.sop_definitions,
+            rules=self.rules_description,
             tools_description=self.tools_description,
             execution_history=history_str,
             action_a=action_a_str,
@@ -1960,18 +2150,18 @@ Please provide a revised action that properly addresses these issues."""
         Returns:
             "R" if R should proceed, "R2" if R2's concerns should be addressed
         """
-        # Format execution history (last 10 actions for context, with result previews)
+        # Format execution history - Judge needs FULL context like R and R2
         if execution_history:
-            recent_history = execution_history[-10:]
             history_str = ""
-            for i, entry in enumerate(recent_history, 1):
+            for i, entry in enumerate(execution_history, 1):
                 if entry.get("error"):
-                    history_str += f"{i}. ❌ {entry.get('action')} - Error: {entry.get('error')[:100]}...\n"
+                    history_str += f"{i}. ❌ {entry.get('action')}({json.dumps(entry.get('kwargs', {}))}) - Error: {entry.get('error')}\n"
                 elif entry.get('duplicate'):
-                    history_str += f"{i}. ⚠️  {entry.get('action')} - Duplicate action (skipped)\n"
+                    history_str += f"{i}. ⚠️  {entry.get('action')}({json.dumps(entry.get('kwargs', {}))}) - Duplicate action (skipped)\n"
                 else:
-                    result_preview = str(entry.get('result', ''))[:100]
-                    history_str += f"{i}. ✓ {entry.get('action')}({json.dumps(entry.get('kwargs', {}))}) - Success\n"
+                    result = entry.get('result', '')
+                    result_str = json.dumps(result) if isinstance(result, (dict, list)) else str(result)
+                    history_str += f"{i}. ✓ {entry.get('action')}({json.dumps(entry.get('kwargs', {}))})\n   Result: {result_str}\n"
         else:
             history_str = "(No actions executed yet)"
 
@@ -1991,10 +2181,6 @@ TASK CONTEXT
 **Assigned SOP Chain** (steps to complete):
 {sop_chain}
 
-**SOP Definitions** (detailed breakdown of what each SOP entails):
-
-{sop_definitions}
-
 **Execution History** (what's been done so far):
 {execution_history}
 
@@ -2005,10 +2191,10 @@ AVAILABLE TOOLS
 {available_tools}
 
 ================================================================================
-DOMAIN RULES
+DOMAIN RULES & SOP DEFINITIONS
 ================================================================================
 
-{domain_rules}
+{rules}
 
 ================================================================================
 ROUNDTABLE DISCUSSION
@@ -2018,7 +2204,9 @@ ROUNDTABLE DISCUSSION
 - Action: {r_action_name}
 - Parameters: {r_action_kwargs}
 - SOP Step: {r_sop_step}
-- R's Reasoning for PROCEEDING despite concerns: {r_reasoning}
+
+**R's Counter-Argument (why R2's concerns don't apply):**
+{r_reasoning}
 
 **Model R2 (Validator)** raised these concerns:
 {r2_concerns}
@@ -2029,11 +2217,23 @@ YOUR DECISION
 
 You must decide who is correct in this disagreement. Consider:
 1. Are R2's concerns valid and important for correctness?
-2. Is R's reasoning sound for why these concerns can be ignored?
+2. Is R's counter-argument sound for why these concerns can be ignored?
 3. What does the SOP chain, SOP definitions, and execution history tell you?
 4. Would following R's approach lead to correct task completion?
 5. Would addressing R2's concerns lead to a better outcome?
 6. Does R's proposed action comply with domain rules and tool schemas?
+
+**CRITICAL: Instruction Overrides SOP Defaults**
+- If the ORIGINAL INSTRUCTION explicitly specifies a value, that OVERRIDES any SOP default
+- SOP defaults only apply when the instruction does NOT specify a value
+- R2 citing "SOP says X but you used Y" is INVALID if the instruction explicitly said to use Y
+- Always check the original instruction first before applying SOP defaults
+
+**CRITICAL: Inapplicable SOPs Can Be Skipped**
+- An SOP in the chain may be INAPPLICABLE if its prerequisites cannot be satisfied
+- Check execution history: Did a read return empty results for what this SOP needs?
+- If the SOP's required input does not exist, Model R can skip it and proceed to the next SOP
+- R2 insisting on executing an inapplicable SOP is INVALID - side with R in this case
 
 **Important Context:**
 - You have the FULL picture: instruction, SOP chain, SOP definitions, execution history, tools, and rules
@@ -2051,10 +2251,9 @@ Decision:"""
         messages = prompt.format_messages(
             instruction=instruction,
             sop_chain=sop_chain_text,
-            sop_definitions=self.sop_definitions,
             execution_history=history_str,
             available_tools=self.tools_description,
-            domain_rules=self.rules,
+            rules=self.rules_description,
             r_action_name=r_action.action_name or "(done=True)",
             r_action_kwargs=json.dumps(r_action.action_kwargs, indent=2) if r_action.action_kwargs else "{}",
             r_sop_step=r_action.sop_step or "(not specified)",
