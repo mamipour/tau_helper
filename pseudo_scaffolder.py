@@ -85,12 +85,6 @@ If the instruction contradicts the SOP chain, FOLLOW THE INSTRUCTION:
 
 {tools_as_functions}
 
-## CRITICAL: Sample Tool Return Structures
-
-These are REAL examples of what tools return. Use these EXACT structures when accessing data:
-
-{sample_outputs}
-
 ## Domain Rules
 
 {rules}
@@ -104,7 +98,6 @@ These are REAL examples of what tools return. Use these EXACT structures when ac
 5. **Skip SOPs that contradict instruction** - If instruction says "no X", don't include X-related SOPs
 6. **No imports needed** - tools are already available
 7. **Use clear variable names** - e.g., `result`, `item_id`, `list_result`
-8. **Match the sample return structures EXACTLY** - don't assume different field names
 
 ## CRITICAL: Instruction-Driven Completeness Check
 
@@ -115,12 +108,12 @@ Before finishing your code, verify:
 - Does your code include a final write/notification step if required?
 - If the instruction mentions "share", "post", "notify" - did you include that call?
 
-## IMPORTANT: Data Structure Notes
+## IMPORTANT: Data Structure Assumptions
 
-- ALWAYS check the sample outputs above to understand the exact return structure
-- Don't assume nested structures - verify field names from samples
-- Use the exact field names shown in samples (case-sensitive)
-- For lists that might be strings or dicts, check samples first
+- Tool returns are typically dicts with descriptive field names
+- Common patterns: result["field"]["id"], result["items"], result["success"]
+- If execution fails due to wrong field access, the error will show the actual structure
+- The system will auto-fix key mismatches during execution
 
 ## CRITICAL: Parameter Names vs Response Field Names
 
@@ -208,11 +201,16 @@ You are reviewing whether the code will accomplish the INSTRUCTION correctly.
 The SOP chain is just a suggestion - the INSTRUCTION is what matters!
 
 **DO Review:**
-1. **Tool Calls**: Are function names valid? Do parameters match tool schemas?
+1. **Tool Calls**: Are function names valid? Do parameters match tool schemas EXACTLY?
 2. **Data Flow**: Are IDs from previous calls used correctly in subsequent calls?
 3. **Instruction Compliance**: Does the code accomplish what the INSTRUCTION asks for?
-4. **Hallucinated Values**: Are IDs INVENTED that don't appear in instruction OR tool results?
+4. **Hallucinated Values**: Are IDs INVENTED that don't appear in instruction?
 5. **Domain Rule Compliance**: Does the code follow formatting rules from Domain Rules (e.g., number formatting, template formats)?
+
+**NOTE: Return Key Access**
+- We don't have sample tool outputs to verify exact return key names
+- If execution fails due to wrong key access, live editing will fix it based on actual error
+- Focus on tool parameters (from Available Tools), not return structures
 
 **CRITICAL: Instruction Overrides SOP Chain!**
 - If instruction says "no historical data" but SOP chain includes historical SOPs → CORRECT to skip them
@@ -234,6 +232,7 @@ The SOP chain is just a suggestion - the INSTRUCTION is what matters!
 - Variable naming conventions
 - Production readiness concerns
 - Whether values from instruction should be "validated" via read tools
+- Exact return key names (live editing fixes these)
 
 ## Response Format
 
@@ -301,10 +300,6 @@ NOTE: The instruction is PRIMARY. If instruction contradicts SOP chain (e.g., "n
 
 {rules}
 
-## Sample Tool Return Structures (EXACT formats)
-
-{sample_outputs}
-
 ## R's Current Code (has issues)
 
 ```python
@@ -329,7 +324,7 @@ You must produce code that:
 
 Fix the issues R2 identified. The main problems are usually:
 - Undefined variables (define them!)
-- Wrong field names (check sample outputs!)
+- Wrong return key access (live editing will fix if wrong)
 - Missing steps (add them!)
 - Format violations (use int() for numbers, correct templates)
 
@@ -345,6 +340,7 @@ Fix the issues R2 identified. The main problems are usually:
 - Error handling, try-catch
 - Dict access safety, KeyError guards
 - Code style
+- Exact return key names (live editing fixes these)
 
 OUTPUT: Return ONLY valid Python code. No explanation.
 
@@ -482,150 +478,6 @@ OUTPUT: Return ONLY valid Python code. No explanation.
         
         return "\n".join(lines)
     
-    def _get_sample_tool_outputs(self) -> str:
-        """Run sample tool calls to show LLM actual return structures (domain-agnostic)."""
-        samples = []
-        sampled_tools = set()
-        
-        if not self.action_executor:
-            return "(No sample outputs available - ActionExecutor not initialized)"
-        
-        samples.append("# SAMPLE TOOL OUTPUTS - showing return structures for each tool type:\n")
-        
-        # Phase 1: Scan ALL tasks to find which tasks cover which unique tools
-        tool_to_task = {}  # tool_name -> (task_index, action_index)
-        for task_idx, task in enumerate(self.action_executor.TASKS):
-            for action_idx, action in enumerate(task.actions):
-                if action.name not in tool_to_task:
-                    tool_to_task[action.name] = (task_idx, action_idx)
-        
-        # Phase 2: Add tasks that introduce NEW tools (prioritize diversity)
-        tasks_to_run = set()
-        tools_covered = set()
-        
-        # First pass: add tasks that introduce tools not yet covered
-        for tool_name, (task_idx, action_idx) in sorted(tool_to_task.items(), key=lambda x: x[1][0]):
-            if tool_name not in tools_covered:
-                tasks_to_run.add(task_idx)
-                # Mark all tools in this task as covered
-                task = self.action_executor.TASKS[task_idx]
-                for a in task.actions:
-                    tools_covered.add(a.name)
-            if len(tasks_to_run) >= 20:  # Max 20 tasks
-                break
-        
-        # Phase 3: Execute tasks and capture unique tool outputs
-        for task_idx in sorted(tasks_to_run):
-            task = self.action_executor.TASKS[task_idx]
-            
-            # Reset for each task context
-            self.action_executor.service.reset_database()
-            self.action_executor.service.reset_tools()
-            
-            for action in task.actions[:10]:  # Execute up to 10 actions per task
-                try:
-                    # Execute the action
-                    result = self.action_executor.execute_action(action.name, action.kwargs)
-                    
-                    # Only capture if we haven't sampled this tool yet
-                    if action.name not in sampled_tools:
-                        # Parse JSON if string
-                        if isinstance(result, str):
-                            try:
-                                result = json.loads(result)
-                            except:
-                                pass
-                        
-                        # Normalize types (floats to ints where appropriate)
-                        result = self._normalize_types(result)
-                        
-                        # Format kwargs for display
-                        kwargs_str = json.dumps(self._normalize_types(action.kwargs))
-                        if len(kwargs_str) > 80:
-                            kwargs_str = kwargs_str[:80] + "..."
-                        
-                        # Truncate large results
-                        result_str = json.dumps(result, indent=2) if isinstance(result, (dict, list)) else str(result)
-                        if len(result_str) > 600:
-                            result_str = result_str[:600] + "\n  ... (truncated)"
-                        
-                        # Add explicit access patterns for key ID extractions
-                        access_hints = self._generate_access_hints(action.name, result)
-                        
-                        samples.append(f"# {action.name}({kwargs_str})\n# Returns:\n{result_str}\n{access_hints}")
-                        sampled_tools.add(action.name)
-                except Exception as e:
-                    # Keep executing to maintain context
-                    pass
-            
-            if len(sampled_tools) >= 20:  # Enough diversity
-                break
-        
-        if len(samples) <= 1:
-            # Fallback: try tools with no required params
-            samples.append("# SAMPLE TOOL OUTPUTS (no-param tools):\n")
-            
-            for tool_name, tool in list(self.tool_map.items())[:5]:
-                info = tool.get_info()
-                required = info.get('function', {}).get('parameters', {}).get('required', [])
-                
-                if not required:
-                    try:
-                        result = tool.invoke(self.action_executor.service.database)
-                        if isinstance(result, str):
-                            try:
-                                result = json.loads(result)
-                            except:
-                                pass
-                        
-                        result_str = json.dumps(result, indent=2) if isinstance(result, (dict, list)) else str(result)
-                        if len(result_str) > 600:
-                            result_str = result_str[:600] + "\n  ... (truncated)"
-                        
-                        samples.append(f"# {tool_name}() returns:\n{result_str}\n")
-                    except:
-                        pass
-        
-        if len(samples) <= 1:
-            samples.append("# No sample outputs available - refer to tool documentation")
-        
-        # Reset database again for actual execution
-        self.action_executor.service.reset_database()
-        self.action_executor.service.reset_tools()
-        
-        # Escape curly braces for the template
-        result = "\n".join(samples)
-        result = result.replace("{", "{{").replace("}", "}}")
-        return result
-    
-    def _generate_access_hints(self, tool_name: str, result: any) -> str:
-        """Generate explicit access pattern hints for common ID extractions."""
-        hints = []
-        
-        if not isinstance(result, dict):
-            return ""
-        
-        # Find nested ID fields and generate access patterns
-        def find_ids(obj, path="result"):
-            if isinstance(obj, dict):
-                for key, value in obj.items():
-                    current_path = f'{path}["{key}"]'
-                    # Check for common ID patterns
-                    if isinstance(value, str) and ("_id" in key.lower() or key.lower().endswith("id")):
-                        hints.append(f"# → {key}: {current_path}")
-                    elif isinstance(value, dict):
-                        find_ids(value, current_path)
-                    elif isinstance(value, list) and len(value) > 0 and isinstance(value[0], dict):
-                        # For lists, show how to access first item
-                        if "id" in value[0] or any("_id" in k.lower() for k in value[0].keys()):
-                            hints.append(f"# → First item: {current_path}[0]")
-        
-        find_ids(result)
-        
-        if hints:
-            return "# ACCESS PATTERNS:\n" + "\n".join(hints[:5]) + "\n"  # Limit to 5 hints
-        return ""
-    
     def _extract_code(self, response: str) -> str:
         """Extract Python code from LLM response."""
         # Remove markdown code fences
@@ -670,17 +522,11 @@ OUTPUT: Return ONLY valid Python code. No explanation.
     
     def _generate_plan(self, instruction: str, sop_chain: List[str], verbose: bool = False) -> str:
         """Have Model R generate a Python plan."""
-        # Get sample tool outputs to show data structures
-        if verbose:
-            print("   Fetching sample tool outputs...")
-        sample_outputs = self._get_sample_tool_outputs()
-        
         prompt = ChatPromptTemplate.from_template(self.PLAN_GENERATION_PROMPT)
         messages = prompt.format_messages(
             instruction=instruction,
             sop_chain=", ".join(sop_chain),
             tools_as_functions=self.tools_as_functions,
-            sample_outputs=sample_outputs,
             rules=self.rules
         )
         
@@ -762,17 +608,12 @@ OUTPUT: Return ONLY valid Python code. No explanation.
             # No judge, return None to indicate failure
             return None
         
-        # Get sample outputs for context
-        sample_outputs = self._get_sample_tool_outputs()
-        sample_outputs_str = json.dumps(sample_outputs, indent=2) if sample_outputs else "No samples available"
-        
         prompt = ChatPromptTemplate.from_template(self.JUDGE_CODE_PROMPT)
         messages = prompt.format_messages(
             instruction=instruction,
             sop_chain=", ".join(sop_chain),
             tools_as_functions=self.tools_as_functions,
             rules=self.rules,
-            sample_outputs=sample_outputs_str,
             code=code,
             concerns="\n".join([f"- {c}" for c in review.concerns]),
             suggestions="\n".join([f"- {s}" for s in review.suggestions]) if review.suggestions else "No specific suggestions",
@@ -1052,12 +893,20 @@ OUTPUT: Return ONLY valid Python code. No explanation.
                 return executed_actions, code
             
             # Ask R2 what went wrong
+            # The actual exception message (str(e)) contains the real error info
+            actual_error = str(e)
+            tool_error = failed_action.error if failed_action.error else "Tool succeeded, but Python code failed after"
+            
             diagnosis_prompt = f"""Execution failed. Diagnose the issue.
 
-## Failed Action
+## Python Exception (THE ACTUAL ERROR)
+{actual_error}
+
+## Last Tool Called
 Tool: {failed_action.name}
 Args: {json.dumps(failed_action.kwargs)}
-Error: {failed_action.error}
+Tool Result: {json.dumps(failed_action.result)[:500] if failed_action.result else 'None'}
+Tool Error: {tool_error}
 
 ## Successful Actions Before Failure
 {chr(10).join([f"- {a.name}: {str(a.result)[:100]}" for a in executed_actions[:-1]])}
@@ -1066,6 +915,8 @@ Error: {failed_action.error}
 ```python
 {code}
 ```
+
+IMPORTANT: The Python Exception shows the ACTUAL error. If it says "Missing expected keys" and shows the actual result dict, use that to identify the correct key names!
 
 What went wrong? How should the code be fixed?
 Respond with:
@@ -1099,13 +950,16 @@ Respond with:
 - Response fields may be camelCase in JSON, but parameters are ALWAYS snake_case
 - Example: jira_get_backlog_issues(board_id=15) NOT jira_get_backlog_issues(boardId=15)
 
+## CRITICAL: Python Exception (THE ACTUAL ERROR)
+{actual_error}
+
 ## R2's Diagnosis
 {diagnosis}
 
 ## Failed Action Details
 Tool: {failed_action.name}
 Args: {json.dumps(failed_action.kwargs)}
-Error: {failed_action.error}
+Tool Result: {json.dumps(failed_action.result)[:500] if failed_action.result else 'None'}
 
 ## Successful Results (use these)
 {chr(10).join([f"{a.name}: {json.dumps(a.result)[:200]}" for a in executed_actions[:-1]])}
@@ -1114,6 +968,8 @@ Error: {failed_action.error}
 ```python
 {code}
 ```
+
+IMPORTANT: The Python Exception shows the ACTUAL error. If it mentions "wacc_used" instead of "wacc", use the CORRECT key name from the actual result!
 
 Fix the code and return the COMPLETE corrected Python code. Keep parameter names as snake_case!
 
