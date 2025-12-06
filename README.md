@@ -210,11 +210,23 @@ python ../tau_helper/run.py execute airline --variation variation_1 --task task_
 # Show statistics
 python ../tau_helper/run.py agent-logs <domain> --variation <variation> --stats
 
+# List all tasks with pass rates
+python ../tau_helper/run.py agent-logs <domain> --variation <variation> --list-tasks
+
 # Analyze specific task
 python ../tau_helper/run.py agent-logs <domain> --variation <variation> --task <task_id>
 
-# Compare ground truth vs agent
-python ../tau_helper/run.py agent-logs <domain> --variation <variation> --task <task_id> --compare
+# Show user simulation messages (initial turn) - 8 per task
+python ../tau_helper/run.py agent-logs <domain> --variation <variation> --user-sim
+
+# Show user sim for specific task (all 8 agent attempts)
+python ../tau_helper/run.py agent-logs <domain> --variation <variation> --task <task_id> --user-sim
+
+# Limit results
+python ../tau_helper/run.py agent-logs <domain> --variation <variation> --user-sim --limit 5
+
+# Use custom agent.json file
+python ../tau_helper/run.py agent-logs <domain> --variation <variation> --agent-json path/to/agent.json --user-sim
 
 # Find problematic tasks
 python ../tau_helper/run.py agent-logs <domain> --variation <variation> --task <task_id> --errors-only

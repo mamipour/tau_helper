@@ -256,6 +256,84 @@ class AgentLogReader:
                 status = '✓ PASS' if succeeded else '✗ FAIL'
                 print(f"  Agent {agent_num}: {status}")
     
+    def get_user_sim_messages(self, task_id: Optional[str] = None, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        """
+        Get initial user simulation messages from all agent runs.
+        
+        Args:
+            task_id: Optional task ID to filter by
+            limit: Optional limit on number of tasks (not attempts)
+            
+        Returns:
+            List of dicts with task_id, attempt_number, agent_succeeded, and user_sim_message
+        """
+        results = []
+        tasks_to_check = [self.get_task_data(task_id)] if task_id else self.results
+        tasks_to_check = [t for t in tasks_to_check if t]  # Filter None
+        
+        for task in tasks_to_check[:limit] if limit else tasks_to_check:
+            task_id = task.get('task_id', 'unknown')
+            
+            # Get ALL attempts (typically 8 per task)
+            attempts = task.get('all_attempts', [])
+            if not attempts:
+                continue
+            
+            for attempt in attempts:
+                attempt_num = attempt.get('attempt_number', 0)
+                agent_succeeded = attempt.get('agent_succeeded', False)
+                
+                trace = attempt.get('agent_trace', {}).get('full_trace', {})
+                turns = trace.get('turns', [])
+                
+                if not turns:
+                    continue
+                
+                first_turn = turns[0]
+                user_message = first_turn.get('user_message', '')
+                
+                if user_message:
+                    results.append({
+                        'task_id': task_id,
+                        'attempt_number': attempt_num,
+                        'agent_succeeded': agent_succeeded,
+                        'user_sim_message': user_message
+                    })
+        
+        return results
+    
+    def print_user_sim_messages(self, task_id: Optional[str] = None, limit: Optional[int] = None):
+        """
+        Print user simulation messages in a readable format.
+        
+        Args:
+            task_id: Optional task ID to filter by
+            limit: Optional limit on number of tasks (not attempts)
+        """
+        messages = self.get_user_sim_messages(task_id, limit)
+        
+        if not messages:
+            print(f"No user simulation messages found")
+            return
+        
+        # Group by task_id
+        from collections import defaultdict
+        by_task = defaultdict(list)
+        for msg in messages:
+            by_task[msg['task_id']].append(msg)
+        
+        for task_id, task_messages in by_task.items():
+            print("=" * 80)
+            print(f"Task: {task_id} ({len(task_messages)} agent attempts)")
+            print("=" * 80)
+            
+            for msg in task_messages:
+                status = "✓ PASS" if msg['agent_succeeded'] else "✗ FAIL"
+                print(f"\n  Agent {msg['attempt_number']}: {status}")
+                print(f"  {'-' * 76}")
+                print(f"  {msg['user_sim_message']}")
+            print()
+    
     def get_statistics(self) -> Dict[str, Any]:
         """Get overall statistics from the logs."""
         total_tasks = len(self.results)

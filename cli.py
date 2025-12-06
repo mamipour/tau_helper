@@ -362,23 +362,31 @@ def execute(domain, variation, task, action, action_range, all_actions, list_tas
 @click.option("--stats", is_flag=True, help="Show statistics")
 @click.option("--no-gt", is_flag=True, help="Don't show ground truth")
 @click.option("--no-agents", is_flag=True, help="Don't show agent runs")
-def agent_logs(domain, variation, agent_json, task, list_tasks, stats, no_gt, no_agents):
+@click.option("--user-sim", is_flag=True, help="Show initial user simulation messages")
+@click.option("--limit", type=int, help="Limit number of results (for --user-sim or --list-tasks)")
+def agent_logs(domain, variation, agent_json, task, list_tasks, stats, no_gt, no_agents, user_sim, limit):
     """
     Analyze agent evaluation logs.
     
     Examples:
     
         # List all tasks
-        tau_helper agent-logs sec --list-tasks
+        tau_helper agent-logs sec --variation variation_2 --list-tasks
         
         # Analyze specific task
-        tau_helper agent-logs sec --task task_072
+        tau_helper agent-logs sec --variation variation_2 --task task_072
         
         # Show statistics
-        tau_helper agent-logs sec --stats
+        tau_helper agent-logs sec --variation variation_2 --stats
+        
+        # Show user simulation messages
+        tau_helper agent-logs sec --variation variation_2 --user-sim
+        
+        # Show user sim for specific task
+        tau_helper agent-logs sec --variation variation_2 --task task_001 --user-sim
         
         # Use custom agent.json location
-        tau_helper agent-logs sec --agent-json /path/to/agent.json --task task_001
+        tau_helper agent-logs sec --variation variation_2 --agent-json /path/to/agent.json --task task_001
     """
     from .agent_log_reader import AgentLogReader, get_available_variations
     
@@ -403,8 +411,41 @@ def agent_logs(domain, variation, agent_json, task, list_tasks, stats, no_gt, no
         console.print(f"[red]Error:[/red] {e}")
         raise click.Abort()
     
-    if list_tasks:
-        summaries = reader.list_tasks(limit=50)
+    if user_sim:
+        # Show user simulation messages
+        messages = reader.get_user_sim_messages(task_id=task, limit=limit)
+        
+        if not messages:
+            console.print("[yellow]No user simulation messages found[/yellow]")
+        else:
+            # Group by task_id
+            from collections import defaultdict
+            by_task = defaultdict(list)
+            for msg in messages:
+                by_task[msg['task_id']].append(msg)
+            
+            for task_id, task_messages in by_task.items():
+                console.print(f"\n[bold cyan]{'='*80}[/bold cyan]")
+                console.print(f"[bold]Task:[/bold] {task_id} [dim]({len(task_messages)} agent attempts)[/dim]")
+                console.print(f"[bold cyan]{'='*80}[/bold cyan]")
+                
+                for msg in task_messages:
+                    status_color = "green" if msg['agent_succeeded'] else "red"
+                    status_text = "✓ PASS" if msg['agent_succeeded'] else "✗ FAIL"
+                    
+                    console.print(Panel(
+                        msg['user_sim_message'],
+                        title=f"👤 Agent {msg['attempt_number']} [{status_color}]{status_text}[/{status_color}]",
+                        border_style=status_color,
+                        box=box.ROUNDED
+                    ))
+            
+            total_attempts = len(messages)
+            total_tasks = len(by_task)
+            console.print(f"\n[dim]Showing {total_attempts} user simulation messages across {total_tasks} task(s)[/dim]")
+    
+    elif list_tasks:
+        summaries = reader.list_tasks(limit=limit or 50)
         
         table = Table(title=f"Tasks in {domain}/{variation}", box=box.ROUNDED)
         table.add_column("Task ID", style="cyan")
@@ -430,8 +471,8 @@ def agent_logs(domain, variation, agent_json, task, list_tasks, stats, no_gt, no
         
         console.print(table)
         
-        if len(reader.results) > 50:
-            console.print(f"\n[dim]... and {len(reader.results) - 50} more tasks[/dim]")
+        if len(reader.results) > (limit or 50):
+            console.print(f"\n[dim]... and {len(reader.results) - (limit or 50)} more tasks[/dim]")
     
     elif stats:
         statistics = reader.get_statistics()
